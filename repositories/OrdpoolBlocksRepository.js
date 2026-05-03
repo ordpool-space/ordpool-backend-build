@@ -1,0 +1,758 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ORDPOOL_BLOCK_DB_FIELDS = void 0;
+const ordpool_parser_1 = require("ordpool-parser");
+const database_1 = __importDefault(require("../database"));
+const logger_1 = __importDefault(require("../logger"));
+exports.ORDPOOL_BLOCK_DB_FIELDS = `
+
+  /* HACK -- Ordpool stats */
+  ordpool_stats.amounts_atomical                             AS amountsAtomical,
+  ordpool_stats.amounts_atomical_mint                        AS amountsAtomicalMint,
+  ordpool_stats.amounts_atomical_update                      AS amountsAtomicalUpdate,
+
+  ordpool_stats.amounts_labitbu                              AS amountsLabitbu,
+  ordpool_stats.amounts_counterparty                         AS amountsCounterparty,
+  ordpool_stats.amounts_stamp                                AS amountsStamp,
+  ordpool_stats.amounts_src721                               AS amountsSrc721,
+  ordpool_stats.amounts_src101                               AS amountsSrc101,
+
+  ordpool_stats.amounts_cat21                                AS amountsCat21,
+  ordpool_stats.amounts_cat21_mint                           AS amountsCat21Mint,
+
+  ordpool_stats.amounts_inscription                          AS amountsInscription,
+  ordpool_stats.amounts_inscription_mint                     AS amountsInscriptionMint,
+  ordpool_stats.amounts_inscription_image                    AS amountsInscriptionImage,
+  ordpool_stats.amounts_inscription_text                     AS amountsInscriptionText,
+  ordpool_stats.amounts_inscription_json                     AS amountsInscriptionJson,
+
+  ordpool_stats.amounts_rune                                 AS amountsRune,
+  ordpool_stats.amounts_rune_etch                            AS amountsRuneEtch,
+  ordpool_stats.amounts_rune_mint                            AS amountsRuneMint,
+  ordpool_stats.amounts_rune_cenotaph                        AS amountsRuneCenotaph,
+
+  ordpool_stats.amounts_brc20                                AS amountsBrc20,
+  ordpool_stats.amounts_brc20_deploy                         AS amountsBrc20Deploy,
+  ordpool_stats.amounts_brc20_mint                           AS amountsBrc20Mint,
+  ordpool_stats.amounts_brc20_transfer                       AS amountsBrc20Transfer,
+
+  ordpool_stats.amounts_src20                                AS amountsSrc20,
+  ordpool_stats.amounts_src20_deploy                         AS amountsSrc20Deploy,
+  ordpool_stats.amounts_src20_mint                           AS amountsSrc20Mint,
+  ordpool_stats.amounts_src20_transfer                       AS amountsSrc20Transfer,
+
+  ordpool_stats.fees_rune_mints                              AS feesRuneMints,                             /* 26 */
+  ordpool_stats.fees_non_uncommon_rune_mints                 AS feesNonUncommonRuneMints,                  /* 27 */
+  ordpool_stats.fees_brc20_mints                             AS feesBrc20Mints,                            /* 28 */
+  ordpool_stats.fees_src20_mints                             AS feesSrc20Mints,                            /* 29 */
+  ordpool_stats.fees_cat21_mints                             AS feesCat21Mints,                            /* 30 */
+  ordpool_stats.fees_atomicals                               AS feesAtomicals,                             /* 31 */
+  ordpool_stats.fees_labitbus                                AS feesLabitbus,                              /* 31b */
+  ordpool_stats.fees_inscription_mints                       AS feesInscriptionMints,                      /* 32 */
+
+  ordpool_stats.inscriptions_total_envelope_size             AS inscriptionsTotalEnvelopeSize,             /* 33 */
+  ordpool_stats.inscriptions_total_content_size              AS inscriptionsTotalContentSize,              /* 34 */
+  ordpool_stats.inscriptions_largest_envelope_size           AS inscriptionsLargestEnvelopeSize,           /* 35 */
+  ordpool_stats.inscriptions_largest_content_size            AS inscriptionsLargestContentSize,            /* 36 */
+  ordpool_stats.inscriptions_largest_envelope_inscription_id AS inscriptionsLargestEnvelopeInscriptionId,  /* 37 */
+  ordpool_stats.inscriptions_largest_content_inscription_id  AS inscriptionsLargestContentInscriptionId,   /* 38 */
+  ordpool_stats.inscriptions_average_envelope_size           AS inscriptionsAverageEnvelopeSize,           /* 39 */
+  ordpool_stats.inscriptions_average_content_size            AS inscriptionsAverageContentSize,            /* 40 */
+
+  ordpool_stats.runes_most_active_mint                       AS runesMostActiveMint,                       /* 41 */
+  ordpool_stats.runes_most_active_non_uncommon_mint          AS runesMostActiveNonUncommonMint,            /* 42 */
+  ordpool_stats.brc20_most_active_mint                       AS brc20MostActiveMint,                       /* 43 */
+  ordpool_stats.src20_most_active_mint                       AS src20MostActiveMint,                       /* 44 */
+
+  ordpool_stats.analyser_version                             AS analyserVersion,                           /* 45 */
+
+  -- Mint Activities
+  GROUP_CONCAT(DISTINCT CONCAT(rune_mint.identifier, ',',  rune_mint.count)  ORDER BY rune_mint.count DESC) AS runeMintActivity,
+  GROUP_CONCAT(DISTINCT CONCAT(brc20_mint.identifier, ',', brc20_mint.count) ORDER BY brc20_mint.count DESC) AS brc20MintActivity,
+  GROUP_CONCAT(DISTINCT CONCAT(src20_mint.identifier, ',', src20_mint.count) ORDER BY src20_mint.count DESC) AS src20MintActivity,
+
+  GROUP_CONCAT(
+    DISTINCT CONCAT(
+      cat21_mint.txid, '|',
+      cat21_mint.fee, '|',
+      cat21_mint.weight
+    ) SEPARATOR ','
+  ) AS cat21MintActivity,
+
+  -- Etch/Deploy Attempts
+  GROUP_CONCAT(
+    DISTINCT CONCAT(
+      rune_etch.txid,                       '|', --  1
+      rune_etch.rune_id,                    '|', --  2
+      COALESCE(rune_etch.rune_name, ''),    '|', --  3
+      COALESCE(rune_etch.divisibility, ''), '|', --  4
+      COALESCE(rune_etch.premine, ''),      '|', --  5
+      COALESCE(rune_etch.symbol, ''),       '|', --  6
+      COALESCE(rune_etch.cap, ''),          '|', --  7
+      COALESCE(rune_etch.amount, ''),       '|', --  8
+      COALESCE(rune_etch.offset_start, ''), '|', --  9
+      COALESCE(rune_etch.offset_end, ''),   '|', -- 10
+      COALESCE(rune_etch.height_start, ''), '|', -- 11
+      COALESCE(rune_etch.height_end, ''),   '|', -- 12
+      IF(rune_etch.turbo, '1', '')               -- 13
+    )
+  ) AS runeEtchAttempts,
+
+  GROUP_CONCAT(
+    DISTINCT CONCAT(
+      COALESCE(brc20_deploy.txid, ''),       '|',
+      COALESCE(brc20_deploy.ticker, ''),     '|',
+      COALESCE(brc20_deploy.max_supply, ''), '|',
+      COALESCE(brc20_deploy.mint_limit, ''), '|',
+      COALESCE(brc20_deploy.decimals, '')
+    )
+  ) AS brc20DeployAttempts,
+
+  GROUP_CONCAT(
+    DISTINCT CONCAT(
+      COALESCE(src20_deploy.txid, ''),       '|',
+      COALESCE(src20_deploy.ticker, ''),     '|',
+      COALESCE(src20_deploy.max_supply, ''), '|',
+      COALESCE(src20_deploy.mint_limit, ''), '|',
+      COALESCE(src20_deploy.decimals, '')
+    )
+  ) AS src20DeployAttempts
+`;
+class OrdpoolBlocksRepository {
+    /**
+     * Save indexed block data in the database
+     */
+    async saveBlockOrdpoolStatsInDatabase(block) {
+        if (!block.extras.ordpoolStats) {
+            return;
+        }
+        try {
+            await this.saveTokenActivity(block.id, block.height, block.extras.ordpoolStats);
+            const query = `INSERT INTO ordpool_stats(
+        hash,
+        height,
+
+        amounts_atomical,
+        amounts_atomical_mint,
+        amounts_atomical_update,
+
+        amounts_labitbu,
+        amounts_counterparty,
+        amounts_stamp,
+        amounts_src721,
+        amounts_src101,
+
+        amounts_cat21,
+        amounts_cat21_mint,
+
+        amounts_inscription,
+        amounts_inscription_mint,
+        amounts_inscription_image,
+        amounts_inscription_text,
+        amounts_inscription_json,
+
+        amounts_rune,
+        amounts_rune_etch,
+        amounts_rune_mint,
+        amounts_rune_cenotaph,
+
+        amounts_brc20,
+        amounts_brc20_deploy,
+        amounts_brc20_mint,
+        amounts_brc20_transfer,
+
+        amounts_src20,
+        amounts_src20_deploy,
+        amounts_src20_mint,
+        amounts_src20_transfer,
+
+        fees_rune_mints,
+        fees_non_uncommon_rune_mints,
+        fees_brc20_mints,
+        fees_src20_mints,
+        fees_cat21_mints,
+        fees_atomicals,
+        fees_labitbus,
+        fees_inscription_mints,
+
+        inscriptions_total_envelope_size,
+        inscriptions_total_content_size,
+        inscriptions_largest_envelope_size,
+        inscriptions_largest_content_size,
+        inscriptions_largest_envelope_inscription_id,
+        inscriptions_largest_content_inscription_id,
+        inscriptions_average_envelope_size,
+        inscriptions_average_content_size,
+
+        runes_most_active_mint,
+        runes_most_active_non_uncommon_mint,
+        brc20_most_active_mint,
+        src20_most_active_mint,
+
+        analyser_version
+
+      ) VALUE (
+        ?,
+        ?,
+
+        ?,  /* amounts_atomical */
+        ?,  /* amounts_atomical_mint */
+        ?,  /* amounts_atomical_update */
+
+        ?,  /* amounts_labitbu */
+        ?,  /* amounts_counterparty */
+        ?,  /* amounts_stamp */
+        ?,  /* amounts_src721 */
+        ?,  /* amounts_src101 */
+
+        ?,  /* amounts_cat21 */
+        ?,  /* amounts_cat21_mint */
+
+        ?,  /* amounts_inscription */
+        ?,  /* amounts_inscription_mint */
+        ?,  /* amounts_inscription_image */
+        ?,  /* amounts_inscription_text */
+        ?,  /* amounts_inscription_json */
+
+        ?,  /* amounts_rune */
+        ?,  /* amounts_rune_etch */
+        ?,  /* amounts_rune_mint */
+        ?,  /* amounts_rune_cenotaph */
+
+        ?,  /* amounts_brc20 */
+        ?,  /* amounts_brc20_deploy */
+        ?,  /* amounts_brc20_mint */
+        ?,  /* amounts_brc20_transfer */
+
+        ?,  /* amounts_src20 */
+        ?,  /* amounts_src20_deploy */
+        ?,  /* amounts_src20_mint */
+        ?,  /* amounts_src20_transfer */
+
+        ?,  /* fees_rune_mints */
+        ?,  /* fees_non_uncommon_rune_mints */
+        ?,  /* fees_brc20_mints */
+        ?,  /* fees_src20_mints */
+        ?,  /* fees_cat21_mints */
+        ?,  /* fees_atomicals */
+        ?,  /* fees_labitbus */
+        ?,  /* fees_inscription_mints */
+
+        ?,  /* 33 inscriptions_total_envelope_size */
+        ?,  /* 34 inscriptions_total_content_size */
+        ?,  /* 35 inscriptions_largest_envelope_size */
+        ?,  /* 36 inscriptions_largest_content_size */
+        ?,  /* 37 inscriptions_largest_envelope_inscription_id */
+        ?,  /* 38 inscriptions_largest_content_inscription_id */
+        ?,  /* 39 inscriptions_average_envelope_size */
+        ?,  /* 40 inscriptions_average_content_size */
+
+        LEFT(?, 20),  /* 41 runes_most_active_mint - truncated to 20 ASCII characters */
+        LEFT(?, 20),  /* 42 runes_most_active_non_uncommon_mint - truncated to 20 ASCII characters */
+        LEFT(?, 20),  /* 43 brc20_most_active_mint - truncated to 20 Unicode characters (between 1 and 4 bytes) */
+        LEFT(?, 20),  /* 44 src20_most_active_mint - truncated to 20 Unicode characters (between 1 and 4 bytes) */
+
+        ?   /* 45 analyser_version */
+      )`;
+            const params = [
+                block.id,
+                block.height,
+                block.extras.ordpoolStats.amounts.atomical,
+                block.extras.ordpoolStats.amounts.atomicalMint,
+                block.extras.ordpoolStats.amounts.atomicalUpdate,
+                block.extras.ordpoolStats.amounts.labitbu,
+                block.extras.ordpoolStats.amounts.counterparty,
+                block.extras.ordpoolStats.amounts.stamp,
+                block.extras.ordpoolStats.amounts.src721,
+                block.extras.ordpoolStats.amounts.src101,
+                block.extras.ordpoolStats.amounts.cat21,
+                block.extras.ordpoolStats.amounts.cat21Mint,
+                block.extras.ordpoolStats.amounts.inscription,
+                block.extras.ordpoolStats.amounts.inscriptionMint,
+                block.extras.ordpoolStats.amounts.inscriptionImage,
+                block.extras.ordpoolStats.amounts.inscriptionText,
+                block.extras.ordpoolStats.amounts.inscriptionJson,
+                block.extras.ordpoolStats.amounts.rune,
+                block.extras.ordpoolStats.amounts.runeEtch,
+                block.extras.ordpoolStats.amounts.runeMint,
+                block.extras.ordpoolStats.amounts.runeCenotaph,
+                block.extras.ordpoolStats.amounts.brc20,
+                block.extras.ordpoolStats.amounts.brc20Deploy,
+                block.extras.ordpoolStats.amounts.brc20Mint,
+                block.extras.ordpoolStats.amounts.brc20Transfer,
+                block.extras.ordpoolStats.amounts.src20,
+                block.extras.ordpoolStats.amounts.src20Deploy,
+                block.extras.ordpoolStats.amounts.src20Mint,
+                block.extras.ordpoolStats.amounts.src20Transfer,
+                block.extras.ordpoolStats.fees.runeMints,
+                block.extras.ordpoolStats.fees.nonUncommonRuneMints,
+                block.extras.ordpoolStats.fees.brc20Mints,
+                block.extras.ordpoolStats.fees.src20Mints,
+                block.extras.ordpoolStats.fees.cat21Mints,
+                block.extras.ordpoolStats.fees.atomicals,
+                block.extras.ordpoolStats.fees.labitbus,
+                block.extras.ordpoolStats.fees.inscriptionMints,
+                block.extras.ordpoolStats.inscriptions.totalEnvelopeSize,
+                block.extras.ordpoolStats.inscriptions.totalContentSize,
+                block.extras.ordpoolStats.inscriptions.largestEnvelopeSize,
+                block.extras.ordpoolStats.inscriptions.largestContentSize,
+                block.extras.ordpoolStats.inscriptions.largestEnvelopeInscriptionId,
+                block.extras.ordpoolStats.inscriptions.largestContentInscriptionId,
+                block.extras.ordpoolStats.inscriptions.averageEnvelopeSize,
+                block.extras.ordpoolStats.inscriptions.averageContentSize,
+                block.extras.ordpoolStats.runes.mostActiveMint,
+                block.extras.ordpoolStats.runes.mostActiveNonUncommonMint,
+                block.extras.ordpoolStats.brc20.mostActiveMint,
+                block.extras.ordpoolStats.src20.mostActiveMint,
+                block.extras.ordpoolStats.version // 45
+            ];
+            await database_1.default.query(query, params, 'silent');
+            logger_1.default.debug(`$saveBlockOrdpoolStatsInDatabase() - Block ${block.height} successfully stored!`, 'Ordpool');
+        }
+        catch (e) {
+            if (e.errno === 1062) {
+                logger_1.default.debug(`$saveBlockOrdpoolStatsInDatabase() - Block ${block.height} has already been indexed, ignoring`, 'Ordpool');
+            }
+            else {
+                logger_1.default.err('Cannot save indexed block into ordpool_stats. Reason: ' + (e instanceof Error ? e.message : e), 'Ordpool');
+                throw e;
+            }
+        }
+    }
+    formatDbBlockIntoOrdpoolStats(dbBlk) {
+        if (!dbBlk.analyserVersion) {
+            return undefined;
+        }
+        return {
+            amounts: {
+                atomical: dbBlk.amountsAtomical,
+                atomicalMint: dbBlk.amountsAtomicalMint,
+                atomicalUpdate: dbBlk.amountsAtomicalUpdate,
+                labitbu: dbBlk.amountsLabitbu,
+                counterparty: dbBlk.amountsCounterparty,
+                stamp: dbBlk.amountsStamp,
+                src721: dbBlk.amountsSrc721,
+                src101: dbBlk.amountsSrc101,
+                cat21: dbBlk.amountsCat21,
+                cat21Mint: dbBlk.amountsCat21Mint,
+                inscription: dbBlk.amountsInscription,
+                inscriptionMint: dbBlk.amountsInscriptionMint,
+                inscriptionImage: dbBlk.amountsInscriptionImage,
+                inscriptionText: dbBlk.amountsInscriptionText,
+                inscriptionJson: dbBlk.amountsInscriptionJson,
+                rune: dbBlk.amountsRune,
+                runeEtch: dbBlk.amountsRuneEtch,
+                runeMint: dbBlk.amountsRuneMint,
+                runeCenotaph: dbBlk.amountsRuneCenotaph,
+                brc20: dbBlk.amountsBrc20,
+                brc20Deploy: dbBlk.amountsBrc20Deploy,
+                brc20Mint: dbBlk.amountsBrc20Mint,
+                brc20Transfer: dbBlk.amountsBrc20Transfer,
+                src20: dbBlk.amountsSrc20,
+                src20Deploy: dbBlk.amountsSrc20Deploy,
+                src20Mint: dbBlk.amountsSrc20Mint,
+                src20Transfer: dbBlk.amountsSrc20Transfer
+            },
+            fees: {
+                runeMints: dbBlk.feesRuneMints,
+                nonUncommonRuneMints: dbBlk.feesNonUncommonRuneMints,
+                brc20Mints: dbBlk.feesBrc20Mints,
+                src20Mints: dbBlk.feesSrc20Mints,
+                cat21Mints: dbBlk.feesCat21Mints,
+                atomicals: dbBlk.feesAtomicals,
+                labitbus: dbBlk.feesLabitbus,
+                inscriptionMints: dbBlk.feesInscriptionMints
+            },
+            inscriptions: {
+                totalEnvelopeSize: dbBlk.inscriptionsTotalEnvelopeSize,
+                totalContentSize: dbBlk.inscriptionsTotalContentSize,
+                largestEnvelopeSize: dbBlk.inscriptionsLargestEnvelopeSize,
+                largestContentSize: dbBlk.inscriptionsLargestContentSize,
+                largestEnvelopeInscriptionId: dbBlk.inscriptionsLargestEnvelopeInscriptionId,
+                largestContentInscriptionId: dbBlk.inscriptionsLargestContentInscriptionId,
+                averageEnvelopeSize: dbBlk.inscriptionsAverageEnvelopeSize,
+                averageContentSize: dbBlk.inscriptionsAverageContentSize
+            },
+            runes: {
+                mostActiveMint: dbBlk.runesMostActiveMint,
+                mostActiveNonUncommonMint: dbBlk.runesMostActiveNonUncommonMint,
+                runeMintActivity: (0, ordpool_parser_1.compactToMintActivity)(dbBlk.runeMintActivity),
+                runeEtchAttempts: (0, ordpool_parser_1.compactToRuneEtchAttempts)(dbBlk.runeEtchAttempts)
+            },
+            brc20: {
+                mostActiveMint: dbBlk.brc20MostActiveMint,
+                brc20MintActivity: (0, ordpool_parser_1.compactToMintActivity)(dbBlk.brc20MintActivity),
+                brc20DeployAttempts: (0, ordpool_parser_1.compactToBrc20DeployAttempts)(dbBlk.brc20DeployAttempts)
+            },
+            src20: {
+                mostActiveMint: dbBlk.src20MostActiveMint,
+                src20MintActivity: (0, ordpool_parser_1.compactToMintActivity)(dbBlk.src20MintActivity),
+                src20DeployAttempts: (0, ordpool_parser_1.compactToSrc20DeployAttempts)(dbBlk.src20DeployAttempts)
+            },
+            cat21: {
+                minimalCat21MintActivity: (0, ordpool_parser_1.compactToMinimalCat21Mints)(dbBlk.cat21MintActivity)
+            },
+            version: dbBlk.analyserVersion
+        };
+    }
+    /**
+     * Inserts generic mint activity data in batches into the database.
+     * The identifier is always truncated to 20 chars
+     *
+     * WARNING: Avoid setting the `batchSize` too high. A very large batch size may cause:
+     * - Queries exceeding `max_allowed_packet` size in MySQL.
+     * - Performance bottlenecks due to a single large insert operation.
+     *
+     * @param tableName - The target table name.
+     * @param data - The data to insert, as an array of rows.
+     * @param batchSize - Number of rows to include in a single batch (default: 100).
+     */
+    async batchInsertMintActivity(tableName, data, batchSize = 100) {
+        for (let i = 0; i < data.length; i += batchSize) {
+            const batch = data.slice(i, i + batchSize);
+            const values = batch.map(() => `(?, ?, LEFT(?, 20), ?)`).join(', ');
+            const query = `
+        INSERT INTO ${tableName} (hash, height, identifier, count)
+        VALUES ${values}
+        ON DUPLICATE KEY UPDATE count = VALUES(count)
+      `;
+            const params = batch.flatMap(row => [row.hash, row.height, row.identifier, row.count]);
+            await database_1.default.query(query, params);
+        }
+    }
+    /**
+     * Batch inserts CAT-21 mint activities into the database.
+     *
+     * WARNING: Avoid setting the `batchSize` too high. A very large batch size may cause:
+     * - Queries exceeding `max_allowed_packet` size in MySQL.
+     * - Performance bottlenecks due to a single large insert operation.
+     *
+     * @param mints - Array of Cat21Mint objects to insert.
+     * @param batchSize - Number of rows to include in a single batch (default: 100).
+     */
+    async batchInsertCat21MintActivity(mints, batchSize = 100) {
+        for (let i = 0; i < mints.length; i += batchSize) {
+            const batch = mints.slice(i, i + batchSize);
+            const values = batch.map(() => `(?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
+            const params = batch.flatMap((mint) => {
+                const { blockId, blockHeight, transactionId, txIndex, number, feeRate, blockTime, fee, size, weight, value, sat, firstOwner, traits } = mint;
+                const { catColors, backgroundColors, glassesColors } = (0, ordpool_parser_1.traitsToCompactColors)(traits);
+                return [
+                    blockId,
+                    blockHeight,
+                    transactionId,
+                    txIndex,
+                    number ?? null,
+                    feeRate,
+                    blockTime,
+                    fee,
+                    size,
+                    weight,
+                    value,
+                    sat ?? null,
+                    firstOwner,
+                    traits.genesis,
+                    catColors,
+                    traits.gender,
+                    traits.designIndex,
+                    traits.designPose,
+                    traits.designExpression,
+                    traits.designPattern,
+                    traits.designFacing,
+                    traits.laserEyes,
+                    traits.background,
+                    backgroundColors,
+                    traits.crown,
+                    traits.glasses,
+                    glassesColors,
+                ];
+            });
+            const query = `
+        INSERT INTO ordpool_stats_cat21_mint (
+          hash, height, txid, tx_index, number, fee_rate, block_time,
+          fee, size, weight, value, sat, first_owner,
+          genesis, cat_colors, gender, design_index, design_pose,
+          design_expression, design_pattern, design_facing,
+          laser_eyes, background, background_colors, crown, glasses, glasses_colors
+        )
+        VALUES ${values}
+        ON DUPLICATE KEY UPDATE
+          number = VALUES(number),
+          fee_rate = VALUES(fee_rate),
+          block_time = VALUES(block_time),
+          fee = VALUES(fee),
+          size = VALUES(size),
+          weight = VALUES(weight),
+          value = VALUES(value),
+          sat = VALUES(sat),
+          first_owner = VALUES(first_owner),
+          genesis = VALUES(genesis),
+          cat_colors = VALUES(cat_colors),
+          gender = VALUES(gender),
+          design_index = VALUES(design_index),
+          design_pose = VALUES(design_pose),
+          design_expression = VALUES(design_expression),
+          design_pattern = VALUES(design_pattern),
+          design_facing = VALUES(design_facing),
+          laser_eyes = VALUES(laser_eyes),
+          background = VALUES(background),
+          background_colors = VALUES(background_colors),
+          crown = VALUES(crown),
+          glasses = VALUES(glasses),
+          glasses_colors = VALUES(glasses_colors)
+      `;
+            await database_1.default.query(query, params);
+        }
+    }
+    /**
+     * Save mints, etchings and deployments into rdpool_stats_* tables.
+     * @param hash - The block hash.
+     * @param height - The block height.
+     * @param stats - The OrdpoolStats object containing the statistics to save.
+     */
+    async saveTokenActivity(hash, height, stats) {
+        // Store Rune Mint Activity in Batches
+        await this.batchInsertMintActivity('ordpool_stats_rune_mint', stats.runes.runeMintActivity
+            .map(([identifier, count]) => ({
+            hash,
+            height,
+            identifier,
+            count
+        })));
+        // Store BRC-20 Mint Activity in Batches
+        await this.batchInsertMintActivity('ordpool_stats_brc20_mint', stats.brc20.brc20MintActivity
+            .map(([identifier, count]) => ({
+            hash,
+            height,
+            identifier,
+            count
+        })));
+        // Store SRC-20 Mint Activity in Batches
+        await this.batchInsertMintActivity('ordpool_stats_src20_mint', stats.src20.src20MintActivity
+            .map(([identifier, count]) => ({
+            hash,
+            height,
+            identifier,
+            count
+        })));
+        // 😻 Store CAT-21 Mint Activity in Batches
+        // should be always defined, for data from the analyser
+        if (stats.cat21.cat21MintActivity) {
+            await this.batchInsertCat21MintActivity(stats.cat21.cat21MintActivity);
+        }
+        // Insert Rune Etch Attempts
+        for (const { txId, //  1
+        runeId, //  2
+        runeName, //  3
+        divisibility, //  4
+        premine, //  5
+        symbol, //  6
+        cap, //  7
+        amount, //  8
+        offsetStart, //  9
+        offsetEnd, // 10
+        heightStart, // 11
+        heightEnd, // 12
+        turbo // 13
+         } of stats.runes.runeEtchAttempts) {
+            await database_1.default.query(`INSERT INTO ordpool_stats_rune_etch (
+            hash,
+            height,
+            txid,           --  1
+            rune_id,        --  2
+            rune_name,      --  3
+            divisibility,   --  4
+            premine,        --  5
+            symbol,         --  6
+            cap,            --  7
+            amount,         --  8
+            offset_start,   --  9
+            offset_end,     -- 10
+            height_start,   -- 11
+            height_end,     -- 12
+            turbo           -- 13
+          ) VALUES (
+            ?,              --  height
+            ?,              --  hash
+            ?,              --  1 (txid)
+            ?,              --  2 (rune_id)
+            LEFT(?, 60),    --  3 (rune_name)
+            ?,              --  4 (divisibility)
+            ?,              --  5 (premine)
+            LEFT(?, 10),    --  6 (symbol)
+            ?,              --  7 (cap)
+            ?,              --  8 (amount)
+            ?,              --  9 (offset_start)
+            ?,              -- 10 (offset_end)
+            ?,              -- 11 (height_start)
+            ?,              -- 12 (height_end)
+            ?               -- 13 (turbo)
+          )
+          ON DUPLICATE KEY UPDATE
+            txid = VALUES(txid),                 --  1
+            rune_name = VALUES(rune_name),       --  3
+            divisibility = VALUES(divisibility), --  4
+            premine = VALUES(premine),           --  5
+            symbol = VALUES(symbol),             --  6
+            cap = VALUES(cap),                   --  7
+            amount = VALUES(amount),             --  8
+            offset_start = VALUES(offset_start), --  9
+            offset_end = VALUES(offset_end),     -- 10
+            height_start = VALUES(height_start), -- 11
+            height_end = VALUES(height_end),     -- 12
+            turbo = VALUES(turbo)                -- 13
+          `, [
+                hash,
+                height,
+                txId ?? null,
+                runeId ?? null,
+                runeName ?? null,
+                (0, ordpool_parser_1.sanitizeU8)(divisibility),
+                (0, ordpool_parser_1.sanitizeU128)(premine),
+                symbol ?? null,
+                (0, ordpool_parser_1.sanitizeU128)(cap),
+                (0, ordpool_parser_1.sanitizeU128)(amount),
+                (0, ordpool_parser_1.sanitizeU64)(offsetStart),
+                (0, ordpool_parser_1.sanitizeU64)(offsetEnd),
+                (0, ordpool_parser_1.sanitizeU64)(heightStart),
+                (0, ordpool_parser_1.sanitizeU64)(heightEnd),
+                turbo ?? null,
+            ]);
+        }
+        // Insert BRC-20 Deploy Attempts
+        for (const { txId, ticker, maxSupply, mintLimit, decimals } of stats.brc20.brc20DeployAttempts) {
+            await database_1.default.query(`INSERT INTO ordpool_stats_brc20_deploy (
+          hash,
+          height,
+          txid,       -- 1
+          ticker,     -- 2
+          max_supply, -- 3
+          mint_limit, -- 4
+          decimals    -- 5
+        )
+        VALUES (
+          ?,           -- hash
+          ?,           -- height
+          ?,           -- 1 (txid)
+          LEFT(?, 20), -- 2 (ticker)
+          LEFT(?, 50), -- 3 (max_supply)
+          LEFT(?, 50), -- 4 (mint_limit)
+          LEFT(?, 5)   -- 5 (decimals)
+        )
+        ON DUPLICATE KEY UPDATE
+          max_supply = VALUES(max_supply), -- 3
+          mint_limit = VALUES(mint_limit), -- 4
+          decimals   = VALUES(decimals)    -- 5
+        `, [
+                hash,
+                height,
+                txId ?? null,
+                ticker ?? null,
+                maxSupply ?? null,
+                mintLimit ?? null,
+                decimals ?? null
+            ]);
+        }
+        // Insert SRC-20 Deploy Attempts
+        for (const { txId, ticker, maxSupply, mintLimit, decimals } of stats.src20.src20DeployAttempts) {
+            await database_1.default.query(`INSERT INTO ordpool_stats_src20_deploy (
+          hash,
+          height,
+          txid,       -- 1
+          ticker,     -- 2
+          max_supply, -- 3
+          mint_limit, -- 4
+          decimals    -- 5
+        )
+        VALUES (
+          ?,           -- hash
+          ?,           -- height
+          ?,           -- 1 (txid)
+          LEFT(?, 20), -- 2 (ticker)
+          LEFT(?, 50), -- 3 (max_supply)
+          LEFT(?, 50), -- 4 (mint_limit)
+          LEFT(?, 5)   -- 5 (decimals)
+        )
+        ON DUPLICATE KEY UPDATE
+          max_supply = VALUES(max_supply), -- 3
+          mint_limit = VALUES(mint_limit), -- 4
+          decimals   = VALUES(decimals)    -- 5
+        `, [
+                hash,
+                height,
+                txId ?? null,
+                ticker ?? null,
+                maxSupply ?? null,
+                mintLimit ?? null,
+                decimals ?? null
+            ]);
+        }
+    }
+    /**
+     * Retrieves the lowest block from the `blocks` table (starting from a given height)
+     * that does not have corresponding data in the `ordpool_stats` table.
+     *
+     * This code is not used at the moment!
+     *
+     * @param startHeight - The height to start searching from.
+     * @returns A promise that resolves to the block information of the first block
+     * without stats, or `null` if all blocks have stats.
+     */
+    async getLowestBlockWithoutOrdpoolStats(startHeight) {
+        const [row] = await database_1.default.query(`SELECT
+        hash,
+        height,
+        UNIX_TIMESTAMP(blockTimestamp) as timestamp
+      FROM blocks
+      WHERE height >= ?
+      AND NOT EXISTS (
+        SELECT 1 FROM ordpool_stats WHERE ordpool_stats.hash = blocks.hash
+      )
+      ORDER BY height ASC
+      LIMIT 1
+      `, [startHeight]);
+        if (!row.length) {
+            return null;
+        }
+        const [result] = row;
+        return {
+            id: result.hash,
+            height: result.height,
+            timestamp: result.timestamp
+        };
+    }
+    /**
+     * Retrieves a batch of blocks (starting from a given height)
+     * that do not have corresponding entries in the `ordpool_stats` table.
+     *
+     * Blocks are ordered by height in ascending order (oldest first).
+     *
+     * @param startHeight - The height to start scanning from.
+     * @param batchSize - The maximum number of blocks to return.
+     * @returns A list of blocks that are missing ordpool stats.
+     */
+    async getBlocksWithoutOrdpoolStatsInRange(startHeight, batchSize) {
+        const [rows] = await database_1.default.query(`
+      SELECT
+        hash,
+        height,
+        UNIX_TIMESTAMP(blockTimestamp) AS timestamp
+      FROM blocks
+      WHERE height >= ?
+        AND NOT EXISTS (
+          SELECT 1 FROM ordpool_stats WHERE ordpool_stats.hash = blocks.hash
+        )
+      ORDER BY height ASC
+      LIMIT ?
+      `, [startHeight, batchSize]);
+        return rows.map((row) => ({
+            id: row.hash,
+            height: row.height,
+            timestamp: row.timestamp
+        }));
+    }
+}
+exports.default = new OrdpoolBlocksRepository();
