@@ -24,5 +24,22 @@ class OrdpoolSkippedBlocksRepository {
         const [rows] = await database_1.default.query(`SELECT COUNT(*) AS c FROM ordpool_stats_skipped`);
         return rows[0]?.c ?? 0;
     }
+    /**
+     * Returns up to `limit` skipped block heights, ordered by height ASC.
+     * The /health/indexer-progress route ships these with the payload so the
+     * block-detail page can answer "was this specific block skipped?" without
+     * a per-block round-trip.
+     *
+     * Skipping is at BLOCK granularity: when any artifact in a block crashes
+     * the parser POISON_THRESHOLD times in a row, the whole block goes into
+     * `ordpool_stats_skipped` and every artifact inside it stays unindexed
+     * until the parser fix lands and the row gets cleared. The list stays
+     * small in practice (one entry per known-bad block); the cap is defensive
+     * against a parser regression that could batch-poison many heights.
+     */
+    async getSkippedHeights(limit = 200) {
+        const [rows] = await database_1.default.query(`SELECT height FROM ordpool_stats_skipped ORDER BY height ASC LIMIT ?`, [limit]);
+        return rows.map((r) => r.height);
+    }
 }
 exports.default = new OrdpoolSkippedBlocksRepository();
