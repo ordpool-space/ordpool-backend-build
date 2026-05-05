@@ -7,6 +7,7 @@ const ordpool_parser_1 = require("ordpool-parser");
 const config_1 = __importDefault(require("../config"));
 const logger_1 = __importDefault(require("../logger"));
 const OrdpoolBlocksRepository_1 = __importDefault(require("../repositories/OrdpoolBlocksRepository"));
+const OrdpoolSkippedBlocksRepository_1 = __importDefault(require("../repositories/OrdpoolSkippedBlocksRepository"));
 const bitcoin_client_1 = __importDefault(require("./bitcoin/bitcoin-client"));
 const blocks_1 = __importDefault(require("./blocks"));
 // HACK -- Ordpool: Hard timeout for RPC calls.
@@ -44,6 +45,28 @@ class OrdpoolMissingStats {
      */
     static rpcHardTimeoutMs = 2 * 60 * 1000;
     /**
+     * Per-block failure counter. Keyed by block height. Cleared on success
+     * for that height, AND cleared once we poison-skip the block. Prevents
+     * the "stuck forever on block 869,599" loop from 2026-05-05 by giving up
+     * on a specific height after a small number of consecutive failures.
+     */
+    failureCount = new Map();
+    /**
+     * After this many consecutive failures on the *same* block height, the
+     * block is upserted into ordpool_stats_skipped and excluded from the
+     * missing-stats query. Recovery: DELETE FROM ordpool_stats_skipped;
+     */
+    static POISON_THRESHOLD = 3;
+    /**
+     * Wall-clock timestamp of the last per-block successful save. Read by the
+     * /api/v1/internal/indexer-progress route to prove the indexer is making
+     * progress; the heartbeat script alerts when this goes stale.
+     */
+    lastSuccessAt = null;
+    getLastSuccessAt() {
+        return this.lastSuccessAt === null ? null : new Date(this.lastSuccessAt);
+    }
+    /**
      * Indicates whether a task is currently running.
      * Prevents overlapping task executions.
      */
@@ -61,7 +84,8 @@ class OrdpoolMissingStats {
             return false;
         }
         this.isTaskRunning = true;
-        let processedAtLeastOneBlock = false;
+        let processedCount = 0;
+        let failedCount = 0;
         const firstInscriptionHeight = (0, ordpool_parser_1.getFirstInscriptionHeight)(config_1.default.MEMPOOL.NETWORK);
         try {
             const blocksToProcess = await OrdpoolBlocksRepository_1.default.getBlocksWithoutOrdpoolStatsInRange(firstInscriptionHeight, batchSize);
@@ -84,6 +108,12 @@ class OrdpoolMissingStats {
                         // this will use esplora, if MEMPOOL.BACKEND === 'esplora'
                         // onlyCoinbase is set to false here, so it will load ALL transactions of the block
                         transactions = await blocks_1.default['$getTransactionsExtended'](block.id, block.height, block.timestamp, false);
+                        const ordpoolStats = await ordpool_parser_1.DigitalArtifactAnalyserService.analyseTransactions(transactions);
+                        await OrdpoolBlocksRepository_1.default.saveBlockOrdpoolStatsInDatabase({
+                            id: block.id,
+                            height: block.height,
+                            extras: { ordpoolStats },
+                        });
                     }
                     else {
                         // uses the Bitcoin Core RPC's getblock method with verbosity level 2.
@@ -105,28 +135,47 @@ class OrdpoolMissingStats {
                         });
                         const t4 = Date.now();
                         logger_1.default.info(`Missing Stats: Block #${block.height} | ${transactions.length} txs | RPC: ${t1 - t0}ms | convert: ${t2 - t1}ms | analyse: ${t3 - t2}ms | save: ${t4 - t3}ms | total: ${t4 - t0}ms`, 'Ordpool');
-                        processedAtLeastOneBlock = true;
-                        continue;
                     }
-                    const ordpoolStats = await ordpool_parser_1.DigitalArtifactAnalyserService.analyseTransactions(transactions);
-                    await OrdpoolBlocksRepository_1.default.saveBlockOrdpoolStatsInDatabase({
-                        id: block.id,
-                        height: block.height,
-                        extras: { ordpoolStats },
-                    });
-                    processedAtLeastOneBlock = true;
+                    processedCount++;
+                    this.lastSuccessAt = Date.now();
+                    this.failureCount.delete(block.height);
                 }
                 catch (error) {
-                    logger_1.default.debug('Missing Stats: Switching to Esplora fallback due to RPC failure.', 'Ordpool');
+                    // Per-block failure path (introduced 2026-05-05 after block 869,599's
+                    // corrupt brotli inscription crashed the parser and the indexer
+                    // looped on it for hours). Track failures per height; after K
+                    // consecutive same-block failures, poison-skip the block and move on.
+                    // Only catastrophic *batch-wide* failure (e.g. DB outage where every
+                    // block fails) bubbles up to the indexer for cooldown — the case
+                    // where `processedCount === 0 && failedCount > 0` at end of batch.
+                    failedCount++;
+                    const errMsg = error instanceof Error ? error.message : String(error);
+                    const count = (this.failureCount.get(block.height) ?? 0) + 1;
+                    this.failureCount.set(block.height, count);
+                    logger_1.default.warn(`Missing Stats: block #${block.height} failed (attempt ${count}/${OrdpoolMissingStats.POISON_THRESHOLD}): ${errMsg}`, 'Ordpool');
+                    // Trigger Esplora fallback for the next block(s) in case the RPC is unhappy.
                     this.fallbackUntil = Date.now() + OrdpoolMissingStats.fallbackCooldownMs;
-                    throw error;
+                    if (count >= OrdpoolMissingStats.POISON_THRESHOLD) {
+                        logger_1.default.err(`Missing Stats: POISON-SKIPPING block #${block.height} after ${count} consecutive failures. Last error: ${errMsg}`, 'Ordpool');
+                        try {
+                            await OrdpoolSkippedBlocksRepository_1.default.upsertSkippedBlock(block.height, block.id, errMsg);
+                            this.failureCount.delete(block.height);
+                        }
+                        catch (skipErr) {
+                            const skipMsg = skipErr instanceof Error ? skipErr.message : String(skipErr);
+                            logger_1.default.err(`Missing Stats: failed to write to ordpool_stats_skipped for block #${block.height}: ${skipMsg}`, 'Ordpool');
+                        }
+                    }
                 }
             }
         }
         finally {
             this.isTaskRunning = false;
         }
-        return processedAtLeastOneBlock;
+        if (processedCount === 0 && failedCount > 0) {
+            throw new Error(`All ${failedCount} blocks in batch failed; aborting batch for indexer cooldown`);
+        }
+        return processedCount > 0;
     }
 }
 exports.default = new OrdpoolMissingStats();

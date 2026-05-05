@@ -3,11 +3,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.insertTestBlock = exports.insertTestPool = exports.getTestDatabaseConfig = exports.waitForDatabase = exports.cleanupTestData = exports.setupTestDatabase = void 0;
+exports.insertTestBlock = exports.insertTestPool = exports.getTestDatabaseConfig = exports.waitForDatabase = exports.cleanupTestData = exports.cleanupOrdpoolStats = exports.setupOrdpoolTestDatabase = exports.setupTestDatabase = void 0;
 const database_1 = __importDefault(require("../database"));
 const config_1 = __importDefault(require("../config"));
 const logger_1 = __importDefault(require("../logger"));
 const database_migration_1 = __importDefault(require("../api/database-migration"));
+const ordpool_database_migration_1 = __importDefault(require("../api/ordpool-database-migration"));
 /**
  * Initialize the test database with schema migrations
  */
@@ -22,6 +23,45 @@ async function setupTestDatabase() {
     }
 }
 exports.setupTestDatabase = setupTestDatabase;
+/**
+ * Initialize the test database with both upstream + ordpool migrations.
+ * Use this for tests that touch ordpool_stats* tables.
+ */
+async function setupOrdpoolTestDatabase() {
+    await setupTestDatabase();
+    await ordpool_database_migration_1.default.$initializeOrMigrateDatabase();
+}
+exports.setupOrdpoolTestDatabase = setupOrdpoolTestDatabase;
+/**
+ * Wipe ordpool_stats* row data (preserves schema). Run between tests
+ * that exercise INSERT paths so each test starts from empty.
+ */
+async function cleanupOrdpoolStats() {
+    const tables = [
+        'ordpool_stats',
+        'ordpool_stats_skipped',
+        'ordpool_stats_rune_mint',
+        'ordpool_stats_brc20_mint',
+        'ordpool_stats_src20_mint',
+        'ordpool_stats_rune_etch',
+        'ordpool_stats_brc20_deploy',
+        'ordpool_stats_src20_deploy',
+        'ordpool_stats_cat21_mint',
+        'ordpool_stats_atomical_op',
+        'ordpool_stats_counterparty',
+    ];
+    await database_1.default.query('SET FOREIGN_KEY_CHECKS = 0');
+    for (const table of tables) {
+        try {
+            await database_1.default.query(`TRUNCATE TABLE ${table}`, [], 'silent');
+        }
+        catch (e) {
+            // table may not exist yet on a partial-migration DB; ignore
+        }
+    }
+    await database_1.default.query('SET FOREIGN_KEY_CHECKS = 1');
+}
+exports.cleanupOrdpoolStats = cleanupOrdpoolStats;
 /**
  * Clean up all data from test tables (but preserve schema)
  * This runs between each test to ensure isolation
