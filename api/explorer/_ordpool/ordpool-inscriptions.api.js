@@ -33,7 +33,13 @@ class OrdpoolInscriptionsApi {
         let transaction = mempool[txId];
         if (!transaction) {
             try {
-                transaction = await bitcoin_api_factory_1.default.$getRawTransaction(txId, true, false, false);
+                // skipConversion=false so the bitcoind RPC shape (vin[].txinwitness) is
+                // converted into the Esplora shape (vin[].witness) that the parser
+                // reads. With skipConversion=true the parser sees no witness array
+                // and returns []; that's how every preview/content lookup silently
+                // 404'd until the tx happened to be in mempool (which is already
+                // stored in Esplora shape on this code path's other branch).
+                transaction = await bitcoin_api_factory_1.default.$getRawTransaction(txId, false, false, false);
             }
             catch (error) {
                 if (error.response && error.response.status === 404) {
