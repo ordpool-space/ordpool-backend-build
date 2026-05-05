@@ -166,6 +166,12 @@ class Mempool {
                     for (const tx of result) {
                         const extendedTransaction = transaction_utils_1.default.extendMempoolTransaction(tx);
                         if (!this.mempoolCache[extendedTransaction.txid]) {
+                            // HACK -- Ordpool: pre-compute ordpool flags on the bulk-load path
+                            // too. Same reason as the per-tx path below — without this, the
+                            // initial mempool warm-up populates the cache without ordpool flags
+                            // and the WS push goes out empty until each tx gets touched again.
+                            await ordpool_parser_1.DigitalArtifactAnalyserService.analyseTransaction(extendedTransaction, 0n);
+                            extendedTransaction.flags = common_1.Common.getTransactionFlags(extendedTransaction);
                             newTransactions.push(extendedTransaction);
                             this.mempoolCache[extendedTransaction.txid] = extendedTransaction;
                         }
@@ -286,6 +292,15 @@ class Mempool {
                     }
                     hasChange = true;
                     newTransactions.push(transaction);
+                    // HACK -- Ordpool: pre-compute ordpool flags on every new mempool tx.
+                    // analyseTransaction sets tx._ordpoolFlags as a side effect, which
+                    // getTransactionFlags (sync) then reads. Without this here, new mempool
+                    // arrivals reach WebSocket clients with zero ordpool bits — homepage's
+                    // mempool-projection view shows no inscription/rune/CAT-21 badges.
+                    // (Bug discovered 2026-05-04; the original pre-enrichment refactor only
+                    // wired up the Redis cache-restore path.)
+                    await ordpool_parser_1.DigitalArtifactAnalyserService.analyseTransaction(transaction, 0n);
+                    transaction.flags = common_1.Common.getTransactionFlags(transaction);
                     if (config_1.default.REDIS.ENABLED) {
                         await redis_cache_1.default.$addTransaction(transaction);
                     }
