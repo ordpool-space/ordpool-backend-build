@@ -10,32 +10,28 @@ const OrdpoolSkippedBlocksRepository_1 = __importDefault(require("../../../repos
 const ordpool_inscriptions_api_1 = __importDefault(require("./ordpool-inscriptions.api"));
 const ordpool_statistics_api_1 = __importDefault(require("./ordpool-statistics.api"));
 /** If the indexer hasn't recorded a per-block success in this many minutes,
- *  the /internal/indexer-progress endpoint returns 503 and the heartbeat
- *  script (deploy-happyserver/scripts/healthcheck-ping.sh) skips its OK ping,
+ *  /api/v1/health/indexer-progress returns 503 and the heartbeat script
+ *  (deploy-happyserver/scripts/healthcheck-ping.sh) skips its OK ping,
  *  triggering a Healthchecks.io grace-expiry alert. */
 const MAX_LAG_MINUTES = 30;
 class GeneralOrdpoolRoutes {
     initRoutes(app) {
         app
             .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/statistics/:type/:interval/:aggregation', this.$getOrdpoolStatistics)
-            .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'internal/indexer-progress', this.$getIndexerProgress)
+            .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'health/indexer-progress', this.$getIndexerProgress)
             .get('/content/:inscriptionId', this.getInscriptionContent)
             .get('/preview/:inscriptionId', this.getInscriptionPreview);
     }
     /**
-     * Internal liveness endpoint. Returns 200 with the indexer's last-success
-     * timestamp + skipped-block count when the indexer is making progress
-     * (lag < MAX_LAG_MINUTES). Returns 503 when stale. Localhost-only — the
-     * cloudflared tunnel forwards /api/v1/* but production access from the
-     * outside is rejected here, since this endpoint exposes internal state.
+     * Public health endpoint. Returns 200 with the indexer's last-success
+     * timestamp + skipped-block count when the missing-stats indexer is making
+     * progress (lag <= MAX_LAG_MINUTES); 503 when stale. The body is
+     * non-sensitive operational data — safe for the heartbeat script to poll
+     * locally and for users to view in the browser.
+     *
+     * @returns JSON `{ ok, lastSuccessAt, lagMinutes, maxLagMinutes, skippedCount }`.
      */
     async $getIndexerProgress(req, res) {
-        const remote = req.ip || req.socket.remoteAddress || '';
-        const isLocal = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
-        if (!isLocal) {
-            res.status(403).send('Forbidden');
-            return;
-        }
         try {
             const lastSuccessAt = ordpool_missing_stats_1.default.getLastSuccessAt();
             const skippedCount = await OrdpoolSkippedBlocksRepository_1.default.getSkippedCount();
