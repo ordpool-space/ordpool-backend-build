@@ -45,6 +45,7 @@ const mempool_2 = __importDefault(require("./api/mempool"));
 const elements_parser_1 = __importDefault(require("./api/liquid/elements-parser"));
 const database_migration_1 = __importDefault(require("./api/database-migration"));
 const electrs_proxy_middleware_1 = require("./electrs-proxy-middleware");
+const inscription_assets_proxy_middleware_1 = require("./inscription-assets-proxy-middleware");
 const sync_assets_1 = __importDefault(require("./sync-assets"));
 const icons_1 = __importDefault(require("./api/liquid/icons"));
 const common_1 = require("./api/common");
@@ -168,6 +169,9 @@ class Server {
         })
             // HACK --- Ordpool: cheap nginx replacement (see electrs-proxy-middleware.ts).
             .use('/api', (0, electrs_proxy_middleware_1.createElectrsProxyMiddleware)(config_1.default.ESPLORA?.REST_API_URL))
+            // HACK --- Ordpool: serve inscription-preview helper assets through the
+            // backend so that iframes hosted at api.ordpool.space can resolve them.
+            .use('/resources/inscription-assets', (0, inscription_assets_proxy_middleware_1.createInscriptionAssetsProxyMiddleware)())
             .use(express_1.default.urlencoded({ extended: true, limit: '10mb' }))
             .use(express_1.default.text({ type: ['text/plain', 'application/base64'], limit: '10mb' }))
             .use(express_1.default.json({ limit: '10mb' }));
