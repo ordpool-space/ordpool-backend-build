@@ -33,7 +33,7 @@ const defaults = {
         'POOLS_JSON_TREE_URL': 'https://api.github.com/repos/mempool/mining-pools/git/trees/master',
         'POOLS_UPDATE_DELAY': 604800,
         'AUDIT': false,
-        'CLUSTER_MEMPOOL': false,
+        'CLUSTER_MEMPOOL': true,
         'CLUSTER_MEMPOOL_INDEXING': false,
         'RUST_GBT': true,
         'LIMIT_GBT': false,
