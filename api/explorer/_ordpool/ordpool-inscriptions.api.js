@@ -1,11 +1,7 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 const ordpool_parser_1 = require("ordpool-parser");
-const bitcoin_api_factory_1 = __importDefault(require("../../bitcoin/bitcoin-api-factory"));
-const mempool_1 = __importDefault(require("../../mempool"));
+const ordpool_tx_fetch_helper_1 = require("./ordpool-tx-fetch.helper");
 class OrdpoolInscriptionsApi {
     async $getInscriptionOrDelegeate(inscriptionId, recursiveLevel = 0) {
         // prevent endless loops via circular delegates
@@ -44,7 +40,7 @@ class OrdpoolInscriptionsApi {
         if (!inscriptions?.length) {
             return undefined;
         }
-        const first = inscriptions.find((i) => (i.contentType || '').startsWith('image/'));
+        const first = inscriptions.find((i) => (0, ordpool_parser_1.isImageContentType)(i.contentType));
         if (!first) {
             return undefined;
         }
@@ -57,24 +53,9 @@ class OrdpoolInscriptionsApi {
         return first;
     }
     async $parseTxInscriptions(txId) {
-        const mempool = mempool_1.default.getMempool();
-        let transaction = mempool[txId];
+        const transaction = await (0, ordpool_tx_fetch_helper_1.$fetchTxByTxid)(txId);
         if (!transaction) {
-            try {
-                // skipConversion=false so the bitcoind RPC shape (vin[].txinwitness) is
-                // converted into the Esplora shape (vin[].witness) that the parser
-                // reads. With skipConversion=true the parser sees no witness array
-                // and returns []; that's how every preview/content lookup silently
-                // 404'd until the tx happened to be in mempool (which is already
-                // stored in Esplora shape on this code path's other branch).
-                transaction = await bitcoin_api_factory_1.default.$getRawTransaction(txId, false, false, false);
-            }
-            catch (error) {
-                if (error.response && error.response.status === 404) {
-                    return undefined;
-                }
-                throw error;
-            }
+            return undefined;
         }
         return ordpool_parser_1.InscriptionParserService.parse(transaction);
     }
