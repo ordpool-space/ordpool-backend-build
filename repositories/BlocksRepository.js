@@ -1272,7 +1272,8 @@ class BlocksRepository {
                 let summaryVersion = 0;
                 if (config_1.default.MEMPOOL.BACKEND === 'esplora') {
                     const txs = (await bitcoin_api_factory_1.default.$getTxsForBlock(dbBlk.id, dbBlk.stale)).map(tx => transaction_utils_1.default.extendTransaction(tx));
-                    summary = blocks_1.default.summarizeBlockTransactions(dbBlk.id, dbBlk.height, txs);
+                    // HACK -- Ordpool: async
+                    summary = await blocks_1.default.summarizeBlockTransactions(dbBlk.id, dbBlk.height, txs);
                     summaryVersion = 1;
                 }
                 else {

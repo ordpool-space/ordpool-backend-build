@@ -30,7 +30,8 @@ class BlockProcessor {
             .map(a => ({ txid: a.txid, max_bid: a.feeDelta }));
         const { templateAlgorithm, cpfpSummary } = detectTemplateAlgorithm(block.height, transactions, poolAccelerations);
         const blockExtended = await blocks_1.default.$getBlockExtended(block, cpfpSummary.transactions, pool);
-        const blockSummary = blocks_1.default.summarizeBlockTransactions(block.id, block.height, cpfpSummary.transactions);
+        // HACK -- Ordpool: async
+        const blockSummary = await blocks_1.default.summarizeBlockTransactions(block.id, block.height, cpfpSummary.transactions);
         let auditResult;
         if (config_1.default.MEMPOOL.AUDIT && mempool_1.default.isInSync()) {
             auditResult = await this.$runAudit(blockExtended, transactions, templateAlgorithm, pool, accelerations);
@@ -69,7 +70,8 @@ class BlockProcessor {
         if (templateAlgorithm === mempool_interfaces_1.TemplateAlgorithm.clusterMempool) {
             const clusterMempool = mempool_1.default.clusterMempool ?? new cluster_mempool_1.ClusterMempool(auditMempool, accelerations, true, 75000);
             const cmBlocks = clusterMempool.getBlocks(config_1.default.MEMPOOL.MEMPOOL_BLOCKS_AMOUNT) ?? [];
-            projectedBlocks = mempool_blocks_1.default.processClusterMempoolBlocks(cmBlocks, auditMempool, accelerations, false, pool.uniqueId);
+            // HACK -- Ordpool: async
+            projectedBlocks = await mempool_blocks_1.default.processClusterMempoolBlocks(cmBlocks, auditMempool, accelerations, false, pool.uniqueId);
         }
         else if (config_1.default.MEMPOOL.RUST_GBT) {
             const added = mempool_1.default.limitGBT ? (candidates?.added || []) : [];

@@ -8,7 +8,6 @@ const bitcoin_api_factory_1 = __importDefault(require("./bitcoin/bitcoin-api-fac
 const logger_1 = __importDefault(require("../logger"));
 const common_1 = require("./common");
 const transaction_utils_1 = __importDefault(require("./transaction-utils"));
-const ordpool_parser_1 = require("ordpool-parser");
 const loading_indicators_1 = __importDefault(require("./loading-indicators"));
 const bitcoin_client_1 = __importDefault(require("./bitcoin/bitcoin-client"));
 const bitcoin_second_client_1 = __importDefault(require("./bitcoin/bitcoin-second-client"));
@@ -130,10 +129,8 @@ class Mempool {
             if (config_1.default.MEMPOOL.CACHE_ENABLED && config_1.default.REDIS.ENABLED) {
                 await redis_cache_1.default.$addTransaction(this.mempoolCache[txid]);
             }
-            // HACK -- Ordpool: pre-compute ordpool flags for mempool transactions.
-            // analyseTransaction sets tx._ordpoolFlags as a side effect, which getTransactionFlags (sync) reads.
-            await ordpool_parser_1.DigitalArtifactAnalyserService.analyseTransaction(this.mempoolCache[txid], 0n);
-            this.mempoolCache[txid].flags = common_1.Common.getTransactionFlags(this.mempoolCache[txid]);
+            // HACK -- Ordpool: async getTransactionFlags awaits parser inline.
+            this.mempoolCache[txid].flags = await common_1.Common.getTransactionFlags(this.mempoolCache[txid]);
             this.mempoolCache[txid].cpfpChecked = false;
             this.mempoolCache[txid].cpfpDirty = true;
             this.mempoolCache[txid].cpfpUpdated = undefined;
@@ -166,12 +163,8 @@ class Mempool {
                     for (const tx of result) {
                         const extendedTransaction = transaction_utils_1.default.extendMempoolTransaction(tx);
                         if (!this.mempoolCache[extendedTransaction.txid]) {
-                            // HACK -- Ordpool: pre-compute ordpool flags on the bulk-load path
-                            // too. Same reason as the per-tx path below — without this, the
-                            // initial mempool warm-up populates the cache without ordpool flags
-                            // and the WS push goes out empty until each tx gets touched again.
-                            await ordpool_parser_1.DigitalArtifactAnalyserService.analyseTransaction(extendedTransaction, 0n);
-                            extendedTransaction.flags = common_1.Common.getTransactionFlags(extendedTransaction);
+                            // HACK -- Ordpool: async getTransactionFlags
+                            extendedTransaction.flags = await common_1.Common.getTransactionFlags(extendedTransaction);
                             newTransactions.push(extendedTransaction);
                             this.mempoolCache[extendedTransaction.txid] = extendedTransaction;
                         }
@@ -292,13 +285,8 @@ class Mempool {
                     }
                     hasChange = true;
                     newTransactions.push(transaction);
-                    // HACK -- Ordpool: pre-compute ordpool flags on every new mempool tx.
-                    // analyseTransaction sets tx._ordpoolFlags as a side effect, which
-                    // getTransactionFlags (sync) then reads. Without this here, new mempool
-                    // arrivals reach WebSocket clients with zero ordpool bits — homepage's
-                    // mempool-projection view shows no inscription/rune/CAT-21 badges.
-                    await ordpool_parser_1.DigitalArtifactAnalyserService.analyseTransaction(transaction, 0n);
-                    transaction.flags = common_1.Common.getTransactionFlags(transaction);
+                    // HACK -- Ordpool: async getTransactionFlags
+                    transaction.flags = await common_1.Common.getTransactionFlags(transaction);
                     if (config_1.default.REDIS.ENABLED) {
                         await redis_cache_1.default.$addTransaction(transaction);
                     }

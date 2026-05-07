@@ -363,7 +363,8 @@ class BitcoinApi {
         if (addedPrevouts) {
             // re-calculate transaction flags now that we have full prevout data
             transaction.flags = undefined; // clear existing flags to force full classification
-            transaction.flags = common_1.Common.getTransactionFlags(transaction, transaction.status?.block_height ?? blocks_1.default.getCurrentBlockHeight());
+            // HACK -- Ordpool: async
+            transaction.flags = await common_1.Common.getTransactionFlags(transaction, transaction.status?.block_height ?? blocks_1.default.getCurrentBlockHeight());
         }
         return transaction;
     }

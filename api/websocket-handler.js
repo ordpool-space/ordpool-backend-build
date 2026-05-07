@@ -617,7 +617,7 @@ class WebsocketHandler {
         }
         if (config_1.default.MEMPOOL.CLUSTER_MEMPOOL) {
             const cmBlocks = mempool_2.default.clusterMempool?.getBlocks(config_1.default.MEMPOOL.MEMPOOL_BLOCKS_AMOUNT) ?? [];
-            mempool_blocks_1.default.processClusterMempoolBlocks(cmBlocks, newMempool, mempool_2.default.getAccelerations());
+            await mempool_blocks_1.default.processClusterMempoolBlocks(cmBlocks, newMempool, mempool_2.default.getAccelerations());
         }
         else if (config_1.default.MEMPOOL.RUST_GBT) {
             await mempool_blocks_1.default.$rustUpdateBlockTemplates(transactionIds, newMempool, added, removed, candidates, true);
