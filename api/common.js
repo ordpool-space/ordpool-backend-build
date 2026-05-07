@@ -597,13 +597,6 @@ class Common {
         if (tx.replacement) {
             flags |= mempool_interfaces_1.TransactionFlags.replacement;
         }
-        // HACK -- Ordpool: parser ORs in artifact flags and returns the combined bigint.
-        try {
-            flags = await ordpool_parser_1.DigitalArtifactAnalyserService.analyseTransaction(tx, flags);
-        }
-        catch (e) {
-            logger_1.default.warn('ordpool-parser analyseTransaction failed: ' + (e instanceof Error ? e.message : e));
-        }
         // Already processed static flags, no need to do it again
         if (tx.flags) {
             return Number(flags);
@@ -776,6 +769,15 @@ class Common {
         }
         if (this.isNonStandard(tx, height)) {
             flags |= mempool_interfaces_1.TransactionFlags.nonstandard;
+        }
+        // HACK -- Ordpool: parser ORs in artifact flags and returns the combined bigint.
+        // Placed at the very end so the early-return path above (when tx.flags was already
+        // computed) skips this call — matches upstream's first-call-only pattern.
+        try {
+            flags = await ordpool_parser_1.DigitalArtifactAnalyserService.analyseTransaction(tx, flags);
+        }
+        catch (e) {
+            logger_1.default.warn('ordpool-parser analyseTransaction failed: ' + (e instanceof Error ? e.message : e));
         }
         return Number(flags);
     }
