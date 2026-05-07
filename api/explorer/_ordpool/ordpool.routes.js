@@ -116,7 +116,12 @@ class GeneralOrdpoolRoutes {
             return;
         }
         try {
-            const inscription = await ordpool_inscriptions_api_1.default.$getInscriptionOrDelegeate(inscriptionId);
+            // A bare 64-hex txid (no `iN` suffix) means: return the first image-bearing
+            // inscription in this tx. Used by the block-overview atlas, which doesn't know
+            // which inscription index in a batch reveal carries the image.
+            const inscription = isBareTxid(inscriptionId)
+                ? await ordpool_inscriptions_api_1.default.$getFirstImageInscription(inscriptionId)
+                : await ordpool_inscriptions_api_1.default.$getInscriptionOrDelegeate(inscriptionId);
             if (!inscription) {
                 res.status(404).send('Transaction or inscription not found.');
                 return;
@@ -163,6 +168,9 @@ class GeneralOrdpoolRoutes {
             res.status(500).send('Internal server error: ' + error);
         }
     }
+}
+function isBareTxid(value) {
+    return /^[0-9a-fA-F]{64}$/.test(value);
 }
 function sendInscription(res, inscription) {
     const contentType = inscription.contentType;

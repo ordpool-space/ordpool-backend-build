@@ -29,6 +29,34 @@ class OrdpoolInscriptionsApi {
         const splitted = inscriptionId.split('i');
         const txId = splitted[0];
         const inscriptionIndex = parseInt(splitted[1]);
+        const inscriptions = await this.$parseTxInscriptions(txId);
+        return inscriptions?.[inscriptionIndex];
+    }
+    // Find the first image-bearing inscription in a tx. Used by the block-overview
+    // atlas: the parser sets ordpool_inscription_image when ANY inscription in the tx
+    // is an image, so a flat `<txid>i0` lookup hits the wrong index whenever the image
+    // sits behind a JSON or text inscription in a batch reveal.
+    async $getFirstImageInscription(txid, recursiveLevel = 0) {
+        if (recursiveLevel > 4) {
+            throw new Error('Too many delegate levels. Stopping.');
+        }
+        const inscriptions = await this.$parseTxInscriptions(txid);
+        if (!inscriptions?.length) {
+            return undefined;
+        }
+        const first = inscriptions.find((i) => (i.contentType || '').startsWith('image/'));
+        if (!first) {
+            return undefined;
+        }
+        const delegates = first.getDelegates();
+        if (delegates.length) {
+            // delegate ids are inscription-shaped (txid + iN); recurse via the existing resolver
+            // so we walk the same chain as direct content lookups.
+            return this.$getInscriptionOrDelegeate(delegates[0], recursiveLevel + 1);
+        }
+        return first;
+    }
+    async $parseTxInscriptions(txId) {
         const mempool = mempool_1.default.getMempool();
         let transaction = mempool[txId];
         if (!transaction) {
@@ -48,8 +76,7 @@ class OrdpoolInscriptionsApi {
                 throw error;
             }
         }
-        const parsedInscriptions = ordpool_parser_1.InscriptionParserService.parse(transaction);
-        return parsedInscriptions[inscriptionIndex];
+        return ordpool_parser_1.InscriptionParserService.parse(transaction);
     }
 }
 exports.default = new OrdpoolInscriptionsApi();
