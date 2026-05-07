@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.isBareTxid = void 0;
 const ordpool_parser_1 = require("ordpool-parser");
 const config_1 = __importDefault(require("../../../config"));
 const blocks_1 = __importDefault(require("../../blocks"));
@@ -169,9 +170,13 @@ class GeneralOrdpoolRoutes {
         }
     }
 }
+// Exported for testing. Bare txid = 64 hex chars with no `iN` suffix.
+// The /content/ route uses this to decide whether to look up a specific
+// inscription index or pick the first image-bearing one in the tx.
 function isBareTxid(value) {
     return /^[0-9a-fA-F]{64}$/.test(value);
 }
+exports.isBareTxid = isBareTxid;
 function sendInscription(res, inscription) {
     const contentType = inscription.contentType;
     if (contentType) {
