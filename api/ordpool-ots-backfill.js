@@ -144,15 +144,15 @@ class OrdpoolOtsBackfill {
         }
         const out = [];
         for (const cal of ordpool_ots_poller_1.KNOWN_CALENDARS) {
-            logger_1.default.info(`OTS backfill: starting ${cal.name} (${cal.url})`, 'Ordpool');
+            logger_1.default.info(`OTS backfill: starting ${cal.nickname} (${cal.url})`, 'Ordpool');
             const seed = await this.getSeedTxid(cal.url);
             if (!seed) {
-                logger_1.default.warn(`OTS backfill: no seed txid for ${cal.name}; skipping`, 'Ordpool');
-                out.push({ calendar: cal.name, txsWalked: 0, txsRecorded: 0, stoppedReason: 'fetch-error' });
+                logger_1.default.warn(`OTS backfill: no seed txid for ${cal.nickname}; skipping`, 'Ordpool');
+                out.push({ calendar: cal.nickname, txsWalked: 0, txsRecorded: 0, stoppedReason: 'fetch-error' });
                 continue;
             }
-            const stats = await this.walkBackward(cal.name, seed, maxDepth);
-            logger_1.default.info(`OTS backfill: ${cal.name} walked=${stats.txsWalked} recorded=${stats.txsRecorded} stopped=${stats.stoppedReason}`, 'Ordpool');
+            const stats = await this.walkBackward(cal.nickname, seed, maxDepth);
+            logger_1.default.info(`OTS backfill: ${cal.nickname} walked=${stats.txsWalked} recorded=${stats.txsRecorded} stopped=${stats.stoppedReason}`, 'Ordpool');
             out.push(stats);
         }
         return out;

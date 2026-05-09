@@ -7,12 +7,26 @@ exports.KNOWN_CALENDARS = void 0;
 const logger_1 = __importDefault(require("../logger"));
 const OrdpoolOtsRepository_1 = __importDefault(require("../repositories/OrdpoolOtsRepository"));
 const ordpool_ots_txid_set_1 = __importDefault(require("./ordpool-ots-txid-set"));
-exports.KNOWN_CALENDARS = [
-    { name: 'alice', url: 'https://alice.btc.calendar.opentimestamps.org/', operator: 'Peter Todd' },
-    { name: 'bob', url: 'https://bob.btc.calendar.opentimestamps.org/', operator: 'Peter Todd' },
-    { name: 'finney', url: 'https://finney.calendar.eternitywall.com/', operator: 'Eternity Wall' },
-    { name: 'catallaxy', url: 'https://btc.calendar.catallaxy.com/', operator: 'Bull Bitcoin' },
-];
+const ots_calendars_config_1 = require("./explorer/_ordpool/ots-calendars-config");
+function withTrailingSlash(c) {
+    return { nickname: c.nickname, url: c.url.endsWith('/') ? c.url : c.url + '/' };
+}
+function knownCalendars() {
+    return (0, ots_calendars_config_1.getOtsCalendars)().map(withTrailingSlash);
+}
+/**
+ * Backwards-compatible export so tests / callers can do
+ *   `KNOWN_CALENDARS.find(c => c.nickname === 'alice')`.
+ * Computed lazily on every property access; safe even before fs/JSON load
+ * completes.
+ */
+exports.KNOWN_CALENDARS = new Proxy([], {
+    get(_target, prop) {
+        const arr = knownCalendars();
+        const v = arr[prop];
+        return typeof v === 'function' ? v.bind(arr) : v;
+    },
+});
 /** Default poll cadence. Sub-RBF-interval keeps every replaced txid catchable. */
 const DEFAULT_INTERVAL_MS = 60 * 1000;
 const FETCH_TIMEOUT_MS = 12 * 1000;
@@ -68,8 +82,8 @@ class OrdpoolOtsPoller {
         }
         catch (e) {
             const message = e instanceof Error ? e.message : String(e);
-            logger_1.default.warn(`OTS poll ${cal.name}: fetch failed -- ${message}`, 'Ordpool');
-            return { calendar: cal.name, ok: false, errorMessage: message, newConfirmed: 0, newPending: 0, upgraded: 0, totalSeen: 0 };
+            logger_1.default.warn(`OTS poll ${cal.nickname}: fetch failed -- ${message}`, 'Ordpool');
+            return { calendar: cal.nickname, ok: false, errorMessage: message, newConfirmed: 0, newPending: 0, upgraded: 0, totalSeen: 0 };
         }
         // The calendar's tip is the canonical 32-byte merkle root we'll attach to
         // every newly-seen tx in this poll cycle. Pre-existing rows already have a
@@ -90,7 +104,7 @@ class OrdpoolOtsPoller {
                 if (tx.blockheight !== undefined && tx.blockhash !== undefined && tx.blocktime !== undefined) {
                     await OrdpoolOtsRepository_1.default.upsertConfirmed({
                         txid: tx.txid,
-                        calendar: cal.name,
+                        calendar: cal.nickname,
                         merkleRoot,
                         blockhash: tx.blockhash,
                         blockheight: tx.blockheight,
@@ -110,7 +124,7 @@ class OrdpoolOtsPoller {
                     if (existing && !existing.confirmedAt) {
                         await OrdpoolOtsRepository_1.default.upsertConfirmed({
                             txid: tx.txid,
-                            calendar: cal.name,
+                            calendar: cal.nickname,
                             merkleRoot: existing.merkleRoot,
                             blockhash: tx.blockhash,
                             blockheight: tx.blockheight,
@@ -129,11 +143,11 @@ class OrdpoolOtsPoller {
         const mr = body.most_recent_tx;
         if (mr && mr !== 'None' && !ordpool_ots_txid_set_1.default.has(mr)) {
             const merkleRoot = tipHex ?? mr;
-            await OrdpoolOtsRepository_1.default.upsertPending({ txid: mr, calendar: cal.name, merkleRoot });
+            await OrdpoolOtsRepository_1.default.upsertPending({ txid: mr, calendar: cal.nickname, merkleRoot });
             ordpool_ots_txid_set_1.default.add(mr);
             newPending++;
         }
-        return { calendar: cal.name, ok: true, newConfirmed, newPending, upgraded, totalSeen: txList.length };
+        return { calendar: cal.nickname, ok: true, newConfirmed, newPending, upgraded, totalSeen: txList.length };
     }
     async fetchCalendarJson(url) {
         const ctrl = new AbortController();

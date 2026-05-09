@@ -26,21 +26,21 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getOtsCalendarHosts = exports.getOtsCalendarUris = void 0;
+exports.getOtsCalendarHosts = exports.getOtsCalendars = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const logger_1 = __importDefault(require("../../../logger"));
-const FALLBACK_URIS = Object.freeze([
-    'https://alice.btc.calendar.opentimestamps.org',
-    'https://bob.btc.calendar.opentimestamps.org',
-    'https://finney.calendar.eternitywall.com',
-    'https://ots.btc.catallaxy.com',
+const FALLBACK_CALENDARS = Object.freeze([
+    Object.freeze({ nickname: 'alice', url: 'https://alice.btc.calendar.opentimestamps.org' }),
+    Object.freeze({ nickname: 'bob', url: 'https://bob.btc.calendar.opentimestamps.org' }),
+    Object.freeze({ nickname: 'finney', url: 'https://finney.calendar.eternitywall.com' }),
+    Object.freeze({ nickname: 'catallaxy', url: 'https://ots.btc.catallaxy.com' }),
 ]);
-let cachedUris = null;
+let cached = null;
 let cachedHosts = null;
 function load() {
-    if (cachedUris)
-        return cachedUris;
+    if (cached)
+        return cached;
     const filePath = path.join(__dirname, 'ots-calendars.json');
     try {
         const raw = fs.readFileSync(filePath, 'utf8');
@@ -48,31 +48,37 @@ function load() {
         if (!parsed?.calendars || !Array.isArray(parsed.calendars) || parsed.calendars.length === 0) {
             throw new Error('ots-calendars.json: empty or malformed calendars[]');
         }
-        const uris = parsed.calendars
-            .filter((u) => typeof u === 'string' && /^https?:\/\//.test(u))
-            .map(u => u.replace(/\/+$/, '')); // strip trailing slash
-        if (uris.length === 0)
-            throw new Error('ots-calendars.json: no usable URIs');
-        cachedUris = Object.freeze(uris);
-        return cachedUris;
+        const out = [];
+        for (const entry of parsed.calendars) {
+            const nickname = String(entry?.nickname || '').trim();
+            const url = String(entry?.url || '').replace(/\/+$/, '');
+            if (nickname && /^https?:\/\//.test(url))
+                out.push({ nickname, url });
+        }
+        if (out.length === 0)
+            throw new Error('ots-calendars.json: no usable entries');
+        cached = Object.freeze(out);
+        return cached;
     }
     catch (e) {
         logger_1.default.warn(`OTS calendars config: ${e instanceof Error ? e.message : e}; using hardcoded fallback`);
-        cachedUris = FALLBACK_URIS;
-        return cachedUris;
+        cached = FALLBACK_CALENDARS;
+        return cached;
     }
 }
-function getOtsCalendarUris() {
+/** All calendars, in declaration order (poller, backfill, frontend picker). */
+function getOtsCalendars() {
     return load();
 }
-exports.getOtsCalendarUris = getOtsCalendarUris;
+exports.getOtsCalendars = getOtsCalendars;
+/** Hostname allowlist for the upgrade proxy. */
 function getOtsCalendarHosts() {
     if (cachedHosts)
         return cachedHosts;
     const hosts = new Set();
-    for (const uri of load()) {
+    for (const c of load()) {
         try {
-            hosts.add(new URL(uri).hostname.toLowerCase());
+            hosts.add(new URL(c.url).hostname.toLowerCase());
         }
         catch { /* skip bad URI */ }
     }

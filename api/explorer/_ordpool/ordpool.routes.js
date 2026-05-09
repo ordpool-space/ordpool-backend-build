@@ -124,7 +124,7 @@ class GeneralOrdpoolRoutes {
     // https://ordpool.space/api/v1/ordpool/ots/stamp-calendars
     async $getOtsStampCalendars(req, res) {
         res.setHeader('Cache-Control', 'public, max-age=3600');
-        res.json({ calendars: (0, ots_calendars_config_1.getOtsCalendarUris)() });
+        res.json({ calendars: (0, ots_calendars_config_1.getOtsCalendars)() });
     }
     /** All OTS commits at a given block height. Empty array if none. */
     // https://ordpool.space/api/v1/ordpool/ots/block/948192
