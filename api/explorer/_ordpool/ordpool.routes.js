@@ -15,6 +15,7 @@ const ordpool_atomicals_api_1 = __importDefault(require("./ordpool-atomicals.api
 const ordpool_inscriptions_api_1 = __importDefault(require("./ordpool-inscriptions.api"));
 const ordpool_stamps_api_1 = __importDefault(require("./ordpool-stamps.api"));
 const ordpool_statistics_api_1 = __importDefault(require("./ordpool-statistics.api"));
+const ots_calendars_config_1 = require("./ots-calendars-config");
 /** If the indexer hasn't recorded a per-block success in this many minutes,
  *  /api/v1/health/indexer-progress returns 503 and the heartbeat script
  *  (deploy-happyserver/scripts/healthcheck-ping.sh) skips its OK ping,
@@ -30,6 +31,7 @@ class GeneralOrdpoolRoutes {
             .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/tx/:txid', this.$getOtsTx)
             .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/block/:height', this.$getOtsBlock)
             .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/upgrade/:calendar/:hash', this.$proxyOtsUpgrade)
+            .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/stamp-calendars', this.$getOtsStampCalendars)
             .get('/content/:inscriptionId', this.getInscriptionContent)
             .get('/preview/:inscriptionId', this.getInscriptionPreview)
             .get('/stamp-content/:txid', this.getStampContent)
@@ -79,12 +81,7 @@ class GeneralOrdpoolRoutes {
      */
     // https://ordpool.space/api/v1/ordpool/ots/upgrade/alice.btc.calendar.opentimestamps.org/<hex>
     async $proxyOtsUpgrade(req, res) {
-        const allowed = new Set([
-            'alice.btc.calendar.opentimestamps.org',
-            'bob.btc.calendar.opentimestamps.org',
-            'finney.calendar.eternitywall.com',
-            'btc.catallaxy.com',
-        ]);
+        const allowed = (0, ots_calendars_config_1.getOtsCalendarHosts)();
         const calendar = String(req.params.calendar || '').toLowerCase();
         const hash = String(req.params.hash || '').toLowerCase();
         if (!allowed.has(calendar)) {
@@ -116,6 +113,18 @@ class GeneralOrdpoolRoutes {
         catch {
             res.status(502).send('upstream error');
         }
+    }
+    /**
+     * Returns the URI list the frontend Stamp & Verify drop-zone fans out to.
+     *
+     * Source of truth: backend/src/api/explorer/_ordpool/ots-calendars.json.
+     * Edit that file to add or remove a calendar; no code change needed.
+     * Cached at the edge for an hour.
+     */
+    // https://ordpool.space/api/v1/ordpool/ots/stamp-calendars
+    async $getOtsStampCalendars(req, res) {
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.json({ calendars: (0, ots_calendars_config_1.getOtsCalendarUris)() });
     }
     /** All OTS commits at a given block height. Empty array if none. */
     // https://ordpool.space/api/v1/ordpool/ots/block/948192
