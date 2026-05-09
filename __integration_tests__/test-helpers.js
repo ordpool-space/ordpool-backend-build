@@ -49,6 +49,7 @@ async function cleanupOrdpoolStats() {
         'ordpool_stats_cat21_mint',
         'ordpool_stats_atomical_op',
         'ordpool_stats_counterparty',
+        'ordpool_stats_ots',
     ];
     await database_1.default.query('SET FOREIGN_KEY_CHECKS = 0');
     for (const table of tables) {

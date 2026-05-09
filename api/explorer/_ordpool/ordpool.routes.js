@@ -8,6 +8,7 @@ const config_1 = __importDefault(require("../../../config"));
 const blocks_1 = __importDefault(require("../../blocks"));
 const ordpool_missing_stats_1 = __importDefault(require("../../ordpool-missing-stats"));
 const OrdpoolBlocksRepository_1 = __importDefault(require("../../../repositories/OrdpoolBlocksRepository"));
+const OrdpoolOtsRepository_1 = __importDefault(require("../../../repositories/OrdpoolOtsRepository"));
 const OrdpoolSkippedBlocksRepository_1 = __importDefault(require("../../../repositories/OrdpoolSkippedBlocksRepository"));
 const ordpool_atomicals_api_1 = __importDefault(require("./ordpool-atomicals.api"));
 const ordpool_inscriptions_api_1 = __importDefault(require("./ordpool-inscriptions.api"));
@@ -23,10 +24,84 @@ class GeneralOrdpoolRoutes {
         app
             .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/statistics/:type/:interval/:aggregation', this.$getOrdpoolStatistics)
             .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'health/indexer-progress', this.$getIndexerProgress)
+            .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/calendars', this.$getOtsCalendars)
+            .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/recent', this.$getOtsRecent)
+            .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/tx/:txid', this.$getOtsTx)
+            .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/block/:height', this.$getOtsBlock)
             .get('/content/:inscriptionId', this.getInscriptionContent)
             .get('/preview/:inscriptionId', this.getInscriptionPreview)
             .get('/stamp-content/:txid', this.getStampContent)
             .get('/atomical-content/:txid', this.getAtomicalContent);
+    }
+    /** Per-calendar summary for the /ots/calendars dashboard. */
+    // https://ordpool.space/api/v1/ordpool/ots/calendars
+    async $getOtsCalendars(req, res) {
+        try {
+            const stats = await OrdpoolOtsRepository_1.default.getCalendarStats();
+            res.setHeader('Cache-Control', 'public, max-age=60');
+            res.json(stats);
+        }
+        catch (e) {
+            res.status(500).send(e instanceof Error ? e.message : String(e));
+        }
+    }
+    /** Most-recent confirmed OTS commits across every calendar. */
+    // https://ordpool.space/api/v1/ordpool/ots/recent?limit=50
+    async $getOtsRecent(req, res) {
+        try {
+            const raw = req.query.limit;
+            const limit = Math.min(Math.max(parseInt(typeof raw === 'string' ? raw : '50', 10) || 50, 1), 500);
+            const rows = await OrdpoolOtsRepository_1.default.getRecent(limit);
+            res.setHeader('Cache-Control', 'public, max-age=30');
+            res.json(rows);
+        }
+        catch (e) {
+            res.status(500).send(e instanceof Error ? e.message : String(e));
+        }
+    }
+    /** All OTS commits at a given block height. Empty array if none. */
+    // https://ordpool.space/api/v1/ordpool/ots/block/948192
+    async $getOtsBlock(req, res) {
+        try {
+            const heightRaw = req.params.height;
+            const height = parseInt(heightRaw, 10);
+            if (!Number.isFinite(height) || height < 0 || height > 10_000_000) {
+                res.status(400).send('height must be a non-negative integer below 10,000,000');
+                return;
+            }
+            const rows = await OrdpoolOtsRepository_1.default.getByBlockheight(height);
+            // Block-level data is immutable once confirmed, cache hard.
+            res.setHeader('Cache-Control', 'public, max-age=300');
+            res.json(rows);
+        }
+        catch (e) {
+            res.status(500).send(e instanceof Error ? e.message : String(e));
+        }
+    }
+    /** Single tx lookup. 404 if the txid isn't a known OTS commit. */
+    // https://ordpool.space/api/v1/ordpool/ots/tx/8d8ce7ac7b68335a040243f31e7e3a2ba8fb82166ca569e7c8b80361b90e8b9f
+    async $getOtsTx(req, res) {
+        try {
+            const txid = req.params.txid;
+            if (!txid || !/^[0-9a-f]{64}$/i.test(txid)) {
+                res.status(400).send('txid must be a 64-char lower-case hex string');
+                return;
+            }
+            const row = await OrdpoolOtsRepository_1.default.getByTxid(txid.toLowerCase());
+            if (!row) {
+                res.status(404).send('Not an OpenTimestamps calendar commit (or not yet seen).');
+                return;
+            }
+            // Confirmed rows can cache aggressively (data is immutable once confirmed).
+            // Pending rows must not cache because they're about to flip.
+            res.setHeader('Cache-Control', row.confirmedAt
+                ? 'public, max-age=300'
+                : 'no-store');
+            res.json(row);
+        }
+        catch (e) {
+            res.status(500).send(e instanceof Error ? e.message : String(e));
+        }
     }
     /**
      * Public health + progress endpoint. Returns 200 when the missing-stats

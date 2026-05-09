@@ -43,6 +43,7 @@ const HashratesRepository_1 = __importDefault(require("../repositories/Hashrates
 const indexer_1 = __importDefault(require("../indexer"));
 const pools_parser_1 = __importDefault(require("./pools-parser"));
 const ordpool_parser_1 = require("ordpool-parser");
+const ordpool_ots_flag_1 = require("./ordpool-ots-flag");
 // HACK: force a given block for debugging reasons
 // const debugBlock = 839999;
 const debugBlock = null;
@@ -396,6 +397,10 @@ class Blocks {
                     });
                 }
                 extras.ordpoolStats = await ordpool_parser_1.DigitalArtifactAnalyserService.analyseTransactions(transactions);
+                // HACK -- Ordpool OTS: indexer-derived flag. analyseTransactions has
+                // already populated tx._ordpoolFlags with witness-derived bits; this
+                // pass ORs in ordpool_ots for any txid in the OTS set.
+                (0, ordpool_ots_flag_1.addOtsFlagBatch)(transactions);
             }
         }
         blk.extras = extras;

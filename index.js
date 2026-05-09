@@ -80,6 +80,8 @@ const wallets_1 = __importDefault(require("./api/services/wallets"));
 const stratum_1 = __importDefault(require("./api/services/stratum"));
 // HACK -- Ordpool imports
 const ordpool_database_migration_1 = __importDefault(require("./api/ordpool-database-migration"));
+const ordpool_ots_txid_set_1 = __importDefault(require("./api/ordpool-ots-txid-set"));
+const ordpool_ots_poller_1 = __importDefault(require("./api/ordpool-ots-poller"));
 const ordpool_routes_1 = __importDefault(require("./api/explorer/_ordpool/ordpool.routes"));
 const ordpool_indexer_1 = __importDefault(require("./ordpool-indexer"));
 class Server {
@@ -154,6 +156,12 @@ class Server {
                 await database_migration_1.default.$initializeOrMigrateDatabase();
                 // HACK -- Ordpool database migration
                 await ordpool_database_migration_1.default.$initializeOrMigrateDatabase();
+                // HACK -- Ordpool: bootstrap the in-memory OTS txid set from the
+                // ordpool_stats_ots satellite table, then start the poller so new
+                // calendar commits land continuously. Per-tx OTS labelling
+                // (addOtsFlag in mempool.ts and $getBlockExtended) reads this set.
+                await ordpool_ots_txid_set_1.default.bootstrap();
+                ordpool_ots_poller_1.default.start();
             }
             catch (e) {
                 throw new Error(e instanceof Error ? e.message : 'Error');

@@ -29,6 +29,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.OnlineFeeStatsCalculator = exports.Common = void 0;
 const bitcoinjs = __importStar(require("bitcoinjs-lib"));
 const ordpool_parser_1 = require("ordpool-parser");
+const ordpool_ots_flag_1 = require("./ordpool-ots-flag");
 const mempool_interfaces_1 = require("../mempool.interfaces");
 const config_1 = __importDefault(require("../config"));
 const net_1 = require("net");
@@ -778,6 +779,15 @@ class Common {
         }
         catch (e) {
             logger_1.default.warn('ordpool-parser analyseTransaction failed: ' + (e instanceof Error ? e.message : e));
+        }
+        // HACK -- Ordpool OTS: indexer-derived flag, injected here so every
+        // tx-classification path (mempool ingest, block extension, websocket
+        // push) picks it up without needing to call addOtsFlag explicitly.
+        // Cheap O(1) Set lookup -- see api/ordpool-ots-flag.ts.
+        (0, ordpool_ots_flag_1.addOtsFlag)(tx);
+        const otsFlags = tx._ordpoolFlags;
+        if (otsFlags) {
+            flags |= BigInt(otsFlags);
         }
         return Number(flags);
     }
