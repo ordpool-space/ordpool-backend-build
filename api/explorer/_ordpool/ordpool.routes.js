@@ -3,7 +3,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const axios_1 = __importDefault(require("axios"));
 const ordpool_parser_1 = require("ordpool-parser");
 const config_1 = __importDefault(require("../../../config"));
 const blocks_1 = __importDefault(require("../../blocks"));
@@ -95,8 +94,12 @@ class GeneralOrdpoolRoutes {
             res.status(400).send('invalid hash');
             return;
         }
+        // 10-second timeout via AbortController -- fetch has no built-in
+        // timeout option (the original axios call used `timeout: 10000`).
+        const abort = new AbortController();
+        const timeout = setTimeout(() => abort.abort(), 10_000);
         try {
-            const upstream = await axios_1.default.get(`https://${calendar}/timestamp/${hash}`, { responseType: 'arraybuffer', timeout: 10000, validateStatus: () => true });
+            const upstream = await fetch(`https://${calendar}/timestamp/${hash}`, { signal: abort.signal });
             // We always return HTTP 200 from this proxy and distinguish via
             // Content-Type:
             //   200 + application/vnd.opentimestamps.v1 + binary body  -> upgraded
@@ -110,9 +113,10 @@ class GeneralOrdpoolRoutes {
             // expected and successful from our perspective.
             // Upstream 5xx maps to our 502 so genuine errors are visible.
             if (upstream.status === 200) {
+                const body = Buffer.from(await upstream.arrayBuffer());
                 res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
                 res.setHeader('Content-Type', 'application/vnd.opentimestamps.v1');
-                res.status(200).end(Buffer.from(upstream.data));
+                res.status(200).end(body);
             }
             else if (upstream.status === 404) {
                 res.setHeader('Cache-Control', 'public, max-age=60');
@@ -126,6 +130,9 @@ class GeneralOrdpoolRoutes {
         }
         catch {
             res.status(502).send('upstream error');
+        }
+        finally {
+            clearTimeout(timeout);
         }
     }
     /**
@@ -386,12 +393,30 @@ function sendInscription(res, inscription) {
         res.setHeader('Content-Encoding', contentEncoding);
     }
     res.setHeader('Content-Length', inscription.contentSize);
+    // HACK -- Ordpool: cache-control for inscription content
+    // Inscriptions are content-addressed by inscription id, so the bytes never
+    // change once committed. `immutable` lets the browser skip revalidation
+    // entirely; `public, max-age` lets Cloudflare cache at the edge.
+    // `no-transform` is the load-bearing bit for decompression-bomb safety:
+    // without it, Cloudflare's edge auto-decompresses brotli/gzip-encoded
+    // bodies when a downstream client sends Accept-Encoding: identity, which
+    // means a 790-byte bomb inscription expands to ~794 MB at the edge on
+    // every uncached hit (cf-cache-status: DYNAMIC). With no-transform,
+    // Cloudflare passes through whatever Content-Encoding we set and the
+    // client decompresses if it can -- which we never do server-side, see
+    // `inscription.getDataRaw()` below.
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable, no-transform');
     // Send the raw data
     res.status(200).send(Buffer.from(inscription.getDataRaw()));
 }
 function sendPreview(res, previewInstructions) {
     res.setHeader('Content-Type', 'text/html;charset=utf-8');
     res.setHeader('Content-Length', previewInstructions.previewContent.length);
+    // HACK -- Ordpool: cache the preview HTML at the edge too. Preview content
+    // is also content-addressed (we deterministically wrap inscription bytes
+    // in a fixed HTML template), so it's safe to mark immutable. no-transform
+    // is still useful here so Cloudflare doesn't HTML-minify our preview.
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable, no-transform');
     // Send the preview HTML
     res.status(200).send(previewInstructions.previewContent);
 }
