@@ -35,6 +35,7 @@ const mempool_blocks_1 = __importDefault(require("./mempool-blocks"));
 const common_1 = require("./common");
 // HACK -- Ordpool: tristate OTS-commit knowledge for the WS track-tx
 // strip-path; see ORDPOOL-FLAGS-ARCHITECTURE.md §4.
+const ordpool_ots_flag_1 = require("./ordpool-ots-flag");
 const ordpool_ots_txid_set_1 = __importDefault(require("./ordpool-ots-txid-set"));
 const loading_indicators_1 = __importDefault(require("./loading-indicators"));
 const config_1 = __importDefault(require("../config"));
@@ -114,6 +115,28 @@ class WebsocketHandler {
     }
     getSerializedInitData() {
         return this.serializedInitData;
+    }
+    /**
+     * HACK -- Ordpool: register a listener on `ordpoolOtsTxidSet` so that
+     * when the OTS poller observes a new calendar batch commit, every WS
+     * client currently tracking that txid (via `track-tx` or `track-txs`)
+     * receives an `otsCommitFlipped` message. Closes the
+     * eventual-consistency gap on long-lived subscriptions: the badge
+     * appears the moment the backend learns, without the user refreshing.
+     *
+     * Idempotent: safe to call once at boot. The returned `unsubscribe`
+     * is intentionally discarded -- the listener lives for the process
+     * lifetime.
+     */
+    setupOtsCommitFlipBroadcasts() {
+        ordpool_ots_txid_set_1.default.subscribe((txid) => {
+            this.broadcastOtsCommitFlipped(txid);
+        });
+    }
+    broadcastOtsCommitFlipped(txid) {
+        if (!this.webSocketServers.length)
+            return;
+        (0, ordpool_ots_flag_1.broadcastOtsCommitFlippedToClients)(this.webSocketServers, txid);
     }
     setupConnectionHandling() {
         if (!this.webSocketServers.length) {
@@ -201,6 +224,8 @@ class WebsocketHandler {
                                         const tx = mempool_1.default.getMempool()[trackTxid];
                                         if (tx) {
                                             if (config_1.default.MEMPOOL.BACKEND === 'esplora') {
+                                                // HACK -- Ordpool: strip-path -- attach OTS-commit tristate.
+                                                (0, ordpool_ots_flag_1.attachIsOtsCommit)(tx);
                                                 response['tx'] = JSON.stringify(tx);
                                             }
                                             else {
@@ -208,7 +233,7 @@ class WebsocketHandler {
                                                 try {
                                                     const fullTx = await transaction_utils_1.default.$getMempoolTransactionExtended(tx.txid, true);
                                                     // HACK -- Ordpool: strip-path -- attach OTS-commit tristate.
-                                                    fullTx.isOtsCommit = ordpool_ots_txid_set_1.default.has(tx.txid);
+                                                    (0, ordpool_ots_flag_1.attachIsOtsCommit)(fullTx);
                                                     response['tx'] = JSON.stringify(fullTx);
                                                 }
                                                 catch (e) {
@@ -220,7 +245,7 @@ class WebsocketHandler {
                                             try {
                                                 const fullTx = await transaction_utils_1.default.$getMempoolTransactionExtended(client['track-tx'], true);
                                                 // HACK -- Ordpool: strip-path -- attach OTS-commit tristate.
-                                                fullTx.isOtsCommit = ordpool_ots_txid_set_1.default.has(client['track-tx']);
+                                                (0, ordpool_ots_flag_1.attachIsOtsCommit)(fullTx);
                                                 response['tx'] = JSON.stringify(fullTx);
                                             }
                                             catch (e) {
@@ -275,6 +300,10 @@ class WebsocketHandler {
                             const txs = {};
                             for (const txid of txids) {
                                 const txInfo = {};
+                                // HACK -- Ordpool: strip-path -- attach OTS-commit tristate
+                                // for every requested txid so the frontend's
+                                // OtsKnowledgeService can apply the bit without a lazy probe.
+                                (0, ordpool_ots_flag_1.setIsOtsCommitByTxid)(txid, txInfo);
                                 const rbfCacheTxid = rbf_cache_1.default.getReplacedBy(txid);
                                 if (rbfCacheTxid) {
                                     txInfo.replacedBy = rbfCacheTxid;

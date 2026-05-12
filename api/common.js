@@ -613,11 +613,7 @@ class Common {
         // The Set.has() lookup is O(1) and runs in every config; the cost of
         // moving it here is negligible. See ordpool-flags-ots-retroactive.test.ts
         // for the regression spec.
-        (0, ordpool_ots_flag_1.addOtsFlag)(tx);
-        const otsFlags = tx._ordpoolFlags;
-        if (otsFlags) {
-            flags |= BigInt(otsFlags);
-        }
+        flags |= (0, ordpool_ots_flag_1.getOtsFlag)(tx.txid);
         // Already processed static flags, no need to do it again
         if (tx.flags) {
             return Number(flags);

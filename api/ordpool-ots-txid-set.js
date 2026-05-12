@@ -10,9 +10,14 @@ const OrdpoolOtsRepository_1 = __importDefault(require("../repositories/OrdpoolO
  * calendar commit. Populated from `ordpool_stats_ots` on backend boot, kept
  * fresh by the poller after every successful insert.
  *
- * Per-tx labelling (the `addOtsFlag` pre-enrichment) does an O(1) `has()`
- * call against this set, never an SQL round-trip. Memory: ~16 MB worst case
- * (~225k txids × ~70 bytes per V8 string).
+ * Per-tx labelling (`getOtsFlag(txid)` in `Common.getTransactionFlags`) does
+ * an O(1) `has()` call against this set, never an SQL round-trip. Memory:
+ * ~16 MB worst case (~225k txids × ~70 bytes per V8 string).
+ *
+ * The set is also observable: a callback registered via `subscribe(cb)`
+ * fires whenever a NEW txid is added. The websocket-handler uses this to
+ * push `otsCommitFlipped` to clients tracking the txid the moment the
+ * poller learns about a calendar batch.
  *
  * Why a singleton: the OTS poller and every flag pre-enrichment call site
  * read/write the same set. There's no use case for multiple instances and
@@ -21,7 +26,13 @@ const OrdpoolOtsRepository_1 = __importDefault(require("../repositories/OrdpoolO
 class OrdpoolOtsTxidSet {
     set = new Set();
     bootstrapped = false;
-    /** Load every txid from the satellite table into memory. Idempotent. */
+    subscribers = new Set();
+    /** Load every txid from the satellite table into memory. Idempotent.
+     *
+     *  Bootstrap uses the underlying native `Set.add` directly, NOT the
+     *  public `add()` method, so the initial hydrate does not notify
+     *  subscribers. (There are no subscribers at boot time anyway; this
+     *  is defensive in case a future caller registers earlier.) */
     async bootstrap() {
         if (this.bootstrapped)
             return;
@@ -40,8 +51,22 @@ class OrdpoolOtsTxidSet {
     has(txid) {
         return this.set.has(txid);
     }
+    /** Insert a txid. Returns `true` if this was a NEW addition (and fires
+     *  subscribers), `false` if the txid was already present. Subscribers
+     *  receive the txid synchronously via callback. */
     add(txid) {
+        if (this.set.has(txid))
+            return false;
         this.set.add(txid);
+        for (const cb of this.subscribers) {
+            try {
+                cb(txid);
+            }
+            catch (e) {
+                logger_1.default.err('OTS txid-set subscriber threw: ' + (e instanceof Error ? e.message : e), 'Ordpool');
+            }
+        }
+        return true;
     }
     size() {
         return this.set.size;
@@ -49,10 +74,18 @@ class OrdpoolOtsTxidSet {
     isBootstrapped() {
         return this.bootstrapped;
     }
-    /** Test-only: drop everything and reset bootstrap flag. */
+    /** Register a listener called once per new txid addition. Returns an
+     *  unsubscribe function. Subscriber exceptions are caught and logged
+     *  so one bad listener can't poison the others. */
+    subscribe(cb) {
+        this.subscribers.add(cb);
+        return () => { this.subscribers.delete(cb); };
+    }
+    /** Test-only: drop everything and reset bootstrap flag (subscribers too). */
     reset() {
         this.set.clear();
         this.bootstrapped = false;
+        this.subscribers.clear();
     }
 }
 exports.default = new OrdpoolOtsTxidSet();

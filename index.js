@@ -159,8 +159,21 @@ class Server {
                 // HACK -- Ordpool: bootstrap the in-memory OTS txid set from the
                 // ordpool_stats_ots satellite table, then start the poller so new
                 // calendar commits land continuously. Per-tx OTS labelling
-                // (addOtsFlag in mempool.ts and $getBlockExtended) reads this set.
-                await ordpool_ots_txid_set_1.default.bootstrap();
+                // (`getOtsFlag` in `Common.getTransactionFlags`) reads this set.
+                //
+                // Bootstrap is fail-soft: a satellite-table outage at boot must
+                // NOT abort backend startup. Worst case the set stays empty,
+                // `getOtsFlag` returns 0n for every tx, no OTS badges appear --
+                // and the poller's regular cycle (or a manual `bootstrap()`
+                // retry from elsewhere) catches up once the DB is healthy. The
+                // alternative -- coupling a non-critical feature to backend
+                // liveness -- would be worse.
+                try {
+                    await ordpool_ots_txid_set_1.default.bootstrap();
+                }
+                catch (e) {
+                    logger_1.default.warn('OTS txid-set bootstrap failed; continuing with empty set. Reason: ' + (e instanceof Error ? e.message : e), 'Ordpool');
+                }
                 ordpool_ots_poller_1.default.start();
             }
             catch (e) {
@@ -361,6 +374,11 @@ class Server {
             });
         }
         websocket_handler_1.default.setupConnectionHandling();
+        // HACK -- Ordpool: register the WS broadcaster that pushes
+        // `otsCommitFlipped` to clients tracking a txid the moment the OTS
+        // poller learns about its calendar batch. See
+        // ORDPOOL-FLAGS-ARCHITECTURE.md §4 and §7 item 1.
+        websocket_handler_1.default.setupOtsCommitFlipBroadcasts();
         if (config_1.default.MEMPOOL.ENABLED) {
             statistics_1.default.setNewStatisticsEntryCallback(websocket_handler_1.default.handleNewStatistic.bind(websocket_handler_1.default));
             mempool_1.default.setAsyncMempoolChangedCallback(websocket_handler_1.default.$handleMempoolChange.bind(websocket_handler_1.default));
@@ -380,7 +398,14 @@ class Server {
             bitcoin_core_routes_1.default.initRoutes(this.app);
         }
         prices_routes_1.default.initRoutes(this.app);
-        if (config_1.default.STATISTICS.ENABLED && config_1.default.DATABASE.ENABLED && config_1.default.MEMPOOL.ENABLED) {
+        // HACK -- Ordpool: register statistics read-routes even when the sampler
+        // is off (STATISTICS.ENABLED=false). Upstream's dashboard polls
+        // /api/v1/statistics/2h unconditionally; without these routes, every
+        // page load on prod emits a 404 to the browser console. The handler
+        // just SELECTs from an empty `statistics` table and returns []. We
+        // still gate on DATABASE.ENABLED + MEMPOOL.ENABLED so the routes only
+        // come up when their backing storage exists.
+        if (config_1.default.DATABASE.ENABLED && config_1.default.MEMPOOL.ENABLED) {
             statistics_routes_1.default.initRoutes(this.app);
         }
         if (common_1.Common.indexingEnabled() && config_1.default.MEMPOOL.ENABLED) {
