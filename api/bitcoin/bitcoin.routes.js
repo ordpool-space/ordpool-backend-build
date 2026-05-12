@@ -28,6 +28,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const bitcoinjs = __importStar(require("bitcoinjs-lib"));
 const config_1 = __importDefault(require("../../config"));
+// HACK -- Ordpool: tristate OTS-commit knowledge on strip wire surfaces;
+// see ORDPOOL-FLAGS-ARCHITECTURE.md §4.
+const ordpool_ots_txid_set_1 = __importDefault(require("../ordpool-ots-txid-set"));
 const websocket_handler_1 = __importDefault(require("../websocket-handler"));
 const mempool_1 = __importDefault(require("../mempool"));
 const fee_api_1 = __importDefault(require("../fee-api"));
@@ -261,6 +264,11 @@ class BitcoinRoutes {
         }
         try {
             const transaction = await transaction_utils_1.default.$getTransactionExtended(req.params.txId, true, false, false, true);
+            // HACK -- Ordpool: strip-path wire surface -- tx.flags is absent
+            // here (upstream's strip-and-recompute pattern). Attach the tristate
+            // OTS-commit answer so the frontend can apply the ordpool_ots bit
+            // without recomputation. O(1) Set.has() lookup.
+            transaction.isOtsCommit = ordpool_ots_txid_set_1.default.has(req.params.txId);
             res.json(transaction);
         }
         catch (e) {

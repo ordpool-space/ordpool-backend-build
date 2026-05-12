@@ -33,6 +33,9 @@ const mempool_1 = __importDefault(require("./mempool"));
 const backend_info_1 = __importDefault(require("./backend-info"));
 const mempool_blocks_1 = __importDefault(require("./mempool-blocks"));
 const common_1 = require("./common");
+// HACK -- Ordpool: tristate OTS-commit knowledge for the WS track-tx
+// strip-path; see ORDPOOL-FLAGS-ARCHITECTURE.md §4.
+const ordpool_ots_txid_set_1 = __importDefault(require("./ordpool-ots-txid-set"));
 const loading_indicators_1 = __importDefault(require("./loading-indicators"));
 const config_1 = __importDefault(require("../config"));
 const transaction_utils_1 = __importDefault(require("./transaction-utils"));
@@ -204,6 +207,8 @@ class WebsocketHandler {
                                                 // tx.prevout is missing from transactions when in bitcoind mode
                                                 try {
                                                     const fullTx = await transaction_utils_1.default.$getMempoolTransactionExtended(tx.txid, true);
+                                                    // HACK -- Ordpool: strip-path -- attach OTS-commit tristate.
+                                                    fullTx.isOtsCommit = ordpool_ots_txid_set_1.default.has(tx.txid);
                                                     response['tx'] = JSON.stringify(fullTx);
                                                 }
                                                 catch (e) {
@@ -214,6 +219,8 @@ class WebsocketHandler {
                                         else {
                                             try {
                                                 const fullTx = await transaction_utils_1.default.$getMempoolTransactionExtended(client['track-tx'], true);
+                                                // HACK -- Ordpool: strip-path -- attach OTS-commit tristate.
+                                                fullTx.isOtsCommit = ordpool_ots_txid_set_1.default.has(client['track-tx']);
                                                 response['tx'] = JSON.stringify(fullTx);
                                             }
                                             catch (e) {

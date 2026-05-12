@@ -9,6 +9,7 @@ const blocks_1 = __importDefault(require("../../blocks"));
 const ordpool_missing_stats_1 = __importDefault(require("../../ordpool-missing-stats"));
 const OrdpoolBlocksRepository_1 = __importDefault(require("../../../repositories/OrdpoolBlocksRepository"));
 const OrdpoolOtsRepository_1 = __importDefault(require("../../../repositories/OrdpoolOtsRepository"));
+const ordpool_ots_txid_set_1 = __importDefault(require("../../ordpool-ots-txid-set"));
 const OrdpoolSkippedBlocksRepository_1 = __importDefault(require("../../../repositories/OrdpoolSkippedBlocksRepository"));
 const ordpool_atomicals_api_1 = __importDefault(require("./ordpool-atomicals.api"));
 const ordpool_inscriptions_api_1 = __importDefault(require("./ordpool-inscriptions.api"));
@@ -31,6 +32,7 @@ class GeneralOrdpoolRoutes {
             .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/block/:height', this.$getOtsBlock)
             .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/upgrade/:calendar/:hash', this.$proxyOtsUpgrade)
             .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/stamp-calendars', this.$getOtsStampCalendars)
+            .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/is-commit/:txid', this.$isOtsCommit)
             .get('/content/:inscriptionId', this.getInscriptionContent)
             .get('/preview/:inscriptionId', this.getInscriptionPreview)
             .get('/stamp-content/:txid', this.getStampContent)
@@ -146,6 +148,29 @@ class GeneralOrdpoolRoutes {
     async $getOtsStampCalendars(req, res) {
         res.setHeader('Cache-Control', 'public, max-age=3600');
         res.json({ calendars: (0, ots_calendars_config_1.getOtsCalendars)() });
+    }
+    /**
+     * Lazy point lookup against the in-memory ordpoolOtsTxidSet: "is this
+     * tx a known OTS calendar batch commit?" Used by the frontend only
+     * when the strip-wire surfaces (REST /tx/:txid, WS track-tx) didn't
+     * already attach the answer as `tx.isOtsCommit`, and when the client-
+     * side OP_RETURN fast-path can't decide. See ORDPOOL-FLAGS-ARCHITECTURE.md
+     * §4 for the full design.
+     *
+     * Cache-Control max-age=60 matches the OTS poller's cycle: a `false`
+     * answer can flip to `true` once the poller learns about a new
+     * calendar batch, but never within a 60-second window (the answer is
+     * monotonic in the `false -> true` direction only).
+     */
+    // https://ordpool.space/api/v1/ordpool/ots/is-commit/abcd...1234
+    async $isOtsCommit(req, res) {
+        const txid = req.params.txid;
+        if (!(0, ordpool_parser_1.isValidTxid)(txid)) {
+            res.status(400).send('invalid txid');
+            return;
+        }
+        res.setHeader('Cache-Control', 'public, max-age=60');
+        res.json({ result: ordpool_ots_txid_set_1.default.has(txid) });
     }
     /** All OTS commits at a given block height. Empty array if none. */
     // https://ordpool.space/api/v1/ordpool/ots/block/948192
