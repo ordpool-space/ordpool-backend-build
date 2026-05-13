@@ -22,6 +22,12 @@ const ots_calendars_config_1 = require("./ots-calendars-config");
  *  (deploy-happyserver/scripts/healthcheck-ping.sh) skips its OK ping,
  *  triggering a Healthchecks.io grace-expiry alert. */
 const MAX_LAG_MINUTES = 30;
+/** User-Agent we send on every proxied OTS calendar request (/digest +
+ *  /upgrade). The default Node fetch UA reads as anonymous bot traffic;
+ *  identifying ourselves with a URL + invitation-to-contact lets calendar
+ *  operators reach us before they reach for the block button. */
+const OTS_PROXY_USER_AGENT = 'Ordpool.space proxy. See https://ordpool.space/open-timestamps. ' +
+    'If you don\'t like what we do, contact us first.';
 class GeneralOrdpoolRoutes {
     initRoutes(app) {
         app
@@ -105,7 +111,10 @@ class GeneralOrdpoolRoutes {
         const abort = new AbortController();
         const timeout = setTimeout(() => abort.abort(), 10_000);
         try {
-            const upstream = await fetch(`https://${calendar}/timestamp/${hash}`, { signal: abort.signal });
+            const upstream = await fetch(`https://${calendar}/timestamp/${hash}`, {
+                signal: abort.signal,
+                headers: { 'User-Agent': OTS_PROXY_USER_AGENT },
+            });
             // We always return HTTP 200 from this proxy and distinguish via
             // Content-Type:
             //   200 + application/vnd.opentimestamps.v1 + binary body  -> upgraded
@@ -180,7 +189,10 @@ class GeneralOrdpoolRoutes {
                 // text/plain matches what the original direct-from-browser request
                 // used and keeps the upstream's "simple request" code path; no
                 // calendar validates Content-Type, they read the body verbatim.
-                headers: { 'Content-Type': 'text/plain' },
+                headers: {
+                    'Content-Type': 'text/plain',
+                    'User-Agent': OTS_PROXY_USER_AGENT,
+                },
                 body,
                 signal: abort.signal,
             });
