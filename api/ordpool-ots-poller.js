@@ -7,6 +7,7 @@ exports.KNOWN_CALENDARS = void 0;
 const logger_1 = __importDefault(require("../logger"));
 const OrdpoolOtsRepository_1 = __importDefault(require("../repositories/OrdpoolOtsRepository"));
 const ordpool_ots_txid_set_1 = __importDefault(require("./ordpool-ots-txid-set"));
+const ordpool_ots_user_agent_1 = require("./ordpool-ots-user-agent");
 const ots_calendars_config_1 = require("./explorer/_ordpool/ots-calendars-config");
 function withTrailingSlash(c) {
     return { nickname: c.nickname, url: c.url.endsWith('/') ? c.url : c.url + '/' };
@@ -154,7 +155,13 @@ class OrdpoolOtsPoller {
         const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
         try {
             const res = await this.fetchImpl(url, {
-                headers: { Accept: 'application/json' },
+                headers: {
+                    'Accept': 'application/json',
+                    // Identify ourselves on every 60-second indexer poll so calendar
+                    // operators recognise the traffic and have a path to contact us
+                    // instead of rate-limiting an anonymous Node fetch UA.
+                    'User-Agent': ordpool_ots_user_agent_1.OTS_OUTBOUND_USER_AGENT,
+                },
                 signal: ctrl.signal,
             });
             if (!res.ok)

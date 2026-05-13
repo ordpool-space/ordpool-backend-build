@@ -11,6 +11,7 @@ const ordpool_missing_stats_1 = __importDefault(require("../../ordpool-missing-s
 const OrdpoolBlocksRepository_1 = __importDefault(require("../../../repositories/OrdpoolBlocksRepository"));
 const OrdpoolOtsRepository_1 = __importDefault(require("../../../repositories/OrdpoolOtsRepository"));
 const ordpool_ots_txid_set_1 = __importDefault(require("../../ordpool-ots-txid-set"));
+const ordpool_ots_user_agent_1 = require("../../ordpool-ots-user-agent");
 const OrdpoolSkippedBlocksRepository_1 = __importDefault(require("../../../repositories/OrdpoolSkippedBlocksRepository"));
 const ordpool_atomicals_api_1 = __importDefault(require("./ordpool-atomicals.api"));
 const ordpool_inscriptions_api_1 = __importDefault(require("./ordpool-inscriptions.api"));
@@ -22,12 +23,6 @@ const ots_calendars_config_1 = require("./ots-calendars-config");
  *  (deploy-happyserver/scripts/healthcheck-ping.sh) skips its OK ping,
  *  triggering a Healthchecks.io grace-expiry alert. */
 const MAX_LAG_MINUTES = 30;
-/** User-Agent we send on every proxied OTS calendar request (/digest +
- *  /upgrade). The default Node fetch UA reads as anonymous bot traffic;
- *  identifying ourselves with a URL + invitation-to-contact lets calendar
- *  operators reach us before they reach for the block button. */
-const OTS_PROXY_USER_AGENT = 'Ordpool.space proxy. See https://ordpool.space/open-timestamps. ' +
-    'If you don\'t like what we do, contact us first.';
 class GeneralOrdpoolRoutes {
     initRoutes(app) {
         app
@@ -113,7 +108,7 @@ class GeneralOrdpoolRoutes {
         try {
             const upstream = await fetch(`https://${calendar}/timestamp/${hash}`, {
                 signal: abort.signal,
-                headers: { 'User-Agent': OTS_PROXY_USER_AGENT },
+                headers: { 'User-Agent': ordpool_ots_user_agent_1.OTS_OUTBOUND_USER_AGENT },
             });
             // We always return HTTP 200 from this proxy and distinguish via
             // Content-Type:
@@ -191,7 +186,7 @@ class GeneralOrdpoolRoutes {
                 // calendar validates Content-Type, they read the body verbatim.
                 headers: {
                     'Content-Type': 'text/plain',
-                    'User-Agent': OTS_PROXY_USER_AGENT,
+                    'User-Agent': ordpool_ots_user_agent_1.OTS_OUTBOUND_USER_AGENT,
                 },
                 body,
                 signal: abort.signal,

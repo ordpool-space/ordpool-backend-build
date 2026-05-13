@@ -9,6 +9,7 @@ const config_1 = __importDefault(require("../config"));
 const OrdpoolOtsRepository_1 = __importDefault(require("../repositories/OrdpoolOtsRepository"));
 const ordpool_ots_txid_set_1 = __importDefault(require("./ordpool-ots-txid-set"));
 const ordpool_ots_poller_1 = require("./ordpool-ots-poller");
+const ordpool_ots_user_agent_1 = require("./ordpool-ots-user-agent");
 /** Hex of `OP_RETURN (0x6a) OP_PUSHBYTES_32 (0x20)`, i.e. the canonical OTS scriptPubKey prefix. */
 const OTS_OP_RETURN_PREFIX = '6a20';
 /**
@@ -57,7 +58,12 @@ class OrdpoolOtsBackfill {
     }
     /** Fetch the most-recent confirmed calendar tx from the calendar's own JSON. */
     async getSeedTxid(calendarUrl) {
-        const res = await this.fetchImpl(calendarUrl, { headers: { Accept: 'application/json' } });
+        const res = await this.fetchImpl(calendarUrl, {
+            headers: {
+                'Accept': 'application/json',
+                'User-Agent': ordpool_ots_user_agent_1.OTS_OUTBOUND_USER_AGENT,
+            },
+        });
         if (!res.ok)
             return null;
         const body = await res.json();
