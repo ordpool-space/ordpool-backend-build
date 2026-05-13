@@ -20,5 +20,5 @@ exports.OTS_OUTBOUND_USER_AGENT = void 0;
  * the operators see one consistent identity across all of our
  * traffic, not three.
  */
-exports.OTS_OUTBOUND_USER_AGENT = 'Ordpool proxy. See https://ordpool.space/open-timestamps. ' +
+exports.OTS_OUTBOUND_USER_AGENT = 'ordpool.space proxy. See https://ordpool.space/open-timestamps. ' +
     'If you don\'t like what we do, contact us first.';
