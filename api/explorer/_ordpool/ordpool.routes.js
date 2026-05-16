@@ -10,7 +10,6 @@ const blocks_1 = __importDefault(require("../../blocks"));
 const ordpool_missing_stats_1 = __importDefault(require("../../ordpool-missing-stats"));
 const OrdpoolBlocksRepository_1 = __importDefault(require("../../../repositories/OrdpoolBlocksRepository"));
 const OrdpoolOtsRepository_1 = __importDefault(require("../../../repositories/OrdpoolOtsRepository"));
-const ordpool_ots_txid_set_1 = __importDefault(require("../../ordpool-ots-txid-set"));
 const ordpool_ots_user_agent_1 = require("../../ordpool-ots-user-agent");
 const OrdpoolSkippedBlocksRepository_1 = __importDefault(require("../../../repositories/OrdpoolSkippedBlocksRepository"));
 const ordpool_atomicals_api_1 = __importDefault(require("./ordpool-atomicals.api"));
@@ -37,7 +36,6 @@ class GeneralOrdpoolRoutes {
             // body-parser-mangled text). 256-byte cap; real OTS digests are 32 bytes.
             .post(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/digest/:calendar', express_1.default.raw({ type: '*/*', limit: 256 }), this.$proxyOtsDigest)
             .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/stamp-calendars', this.$getOtsStampCalendars)
-            .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/is-commit/:txid', this.$isOtsCommit)
             .get('/content/:inscriptionId', this.getInscriptionContent)
             .get('/preview/:inscriptionId', this.getInscriptionPreview)
             .get('/stamp-content/:txid', this.getStampContent)
@@ -210,35 +208,6 @@ class GeneralOrdpoolRoutes {
         res.setHeader('Cache-Control', 'public, max-age=3600');
         res.json({ calendars: (0, ots_calendars_config_1.getOtsCalendars)() });
     }
-    /**
-     * Lazy point lookup against the in-memory ordpoolOtsTxidSet: "is this
-     * tx a known OTS calendar batch commit?" Used by the frontend only
-     * when the strip-wire surfaces (REST /tx/:txid, WS track-tx) didn't
-     * already attach the answer as `tx.isOtsCommit`, and when the client-
-     * side OP_RETURN fast-path can't decide. See ORDPOOL-FLAGS-ARCHITECTURE.md
-     * §4 for the full design.
-     *
-     * Cache-Control max-age=60 matches the OTS poller's cycle: a `false`
-     * answer can flip to `true` once the poller learns about a new
-     * calendar batch, but never within a 60-second window (the answer is
-     * monotonic in the `false -> true` direction only).
-     *
-     * `stale-while-revalidate=60` lets Cloudflare keep serving the cached
-     * answer for an extra 60 s while it refetches in the background. If
-     * the poller stalls (network blip, calendar 5xx), users see the
-     * previous answer instead of a thundering-herd of probes against the
-     * backend.
-     */
-    // https://ordpool.space/api/v1/ordpool/ots/is-commit/abcd...1234
-    async $isOtsCommit(req, res) {
-        const txid = req.params.txid;
-        if (!(0, ordpool_parser_1.isValidTxid)(txid)) {
-            res.status(400).send('invalid txid');
-            return;
-        }
-        res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=60');
-        res.json({ result: ordpool_ots_txid_set_1.default.has(txid) });
-    }
     /** All OTS commits at a given block height. Empty array if none. */
     // https://ordpool.space/api/v1/ordpool/ots/block/948192
     async $getOtsBlock(req, res) {
@@ -258,11 +227,9 @@ class GeneralOrdpoolRoutes {
             res.status(500).send(e instanceof Error ? e.message : String(e));
         }
     }
-    /** Single tx lookup. Always 200 — a "not an OTS commit" answer is a
-     *  legitimate negative result, not an error. Returning 404 would yell
-     *  in the browser's devtools for every rune / inscription / random
-     *  OP_RETURN tx the user opens, even though nothing is actually wrong.
-     *  Body shape: `{ found: true, row }` or `{ found: false }`. */
+    /** Single tx lookup. Always 200 with `{ found, row? }` so non-OTS txs
+     *  don't surface as 404s in the browser devtools. Callers wanting only
+     *  the boolean derive it from `found`. */
     // https://ordpool.space/api/v1/ordpool/ots/tx/8d8ce7ac7b68335a040243f31e7e3a2ba8fb82166ca569e7c8b80361b90e8b9f
     async $getOtsTx(req, res) {
         try {
@@ -273,16 +240,28 @@ class GeneralOrdpoolRoutes {
             }
             const row = await OrdpoolOtsRepository_1.default.getByTxid(txid.toLowerCase());
             if (!row) {
-                // Negative answers are cheap and stable enough to cache briefly.
-                res.setHeader('Cache-Control', 'public, max-age=60');
+                // Negative answer can flip to positive once the poller learns
+                // about a new calendar batch (monotonic in the false→true
+                // direction). 60s matches the poller cycle; SWR gives Cloudflare
+                // 5 more minutes to keep serving while it refetches in the
+                // background, absorbing thundering-herd on hot pages.
+                res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
                 res.json({ found: false });
                 return;
             }
-            // Confirmed rows can cache aggressively (data is immutable once confirmed).
-            // Pending rows must not cache because they're about to flip.
-            res.setHeader('Cache-Control', row.confirmedAt
-                ? 'public, max-age=300'
-                : 'no-store');
+            if (row.confirmedAt) {
+                // Confirmed OTS commit data is effectively stable: merkle root,
+                // calendar, fee, blockhash, blockheight don't change in the
+                // common case. Cache 1h fresh + 24h stale-while-revalidate at
+                // the edge. NOT `immutable` -- a reorg can rewrite blockhash /
+                // blockheight on a recently-confirmed row, and that would
+                // poison `immutable` caches forever.
+                res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+            }
+            else {
+                // Pending rows are about to flip when the tx confirms.
+                res.setHeader('Cache-Control', 'no-store');
+            }
             res.json({ found: true, row });
         }
         catch (e) {
