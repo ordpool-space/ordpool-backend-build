@@ -34,11 +34,7 @@ const FALLBACK_CALENDARS = Object.freeze([
     Object.freeze({ nickname: 'alice', url: 'https://alice.btc.calendar.opentimestamps.org' }),
     Object.freeze({ nickname: 'bob', url: 'https://bob.btc.calendar.opentimestamps.org' }),
     Object.freeze({ nickname: 'finney', url: 'https://finney.calendar.eternitywall.com' }),
-    Object.freeze({
-        nickname: 'catallaxy',
-        url: 'https://ots.btc.catallaxy.com',
-        upgradeUrl: 'https://btc.calendar.catallaxy.com',
-    }),
+    Object.freeze({ nickname: 'catallaxy', url: 'https://btc.calendar.catallaxy.com' }),
 ]);
 let cached = null;
 let cachedHosts = null;
@@ -56,10 +52,8 @@ function load() {
         for (const entry of parsed.calendars) {
             const nickname = String(entry?.nickname || '').trim();
             const url = String(entry?.url || '').replace(/\/+$/, '');
-            const upgradeUrlRaw = String(entry?.upgradeUrl || '').replace(/\/+$/, '');
-            const upgradeUrl = /^https?:\/\//.test(upgradeUrlRaw) ? upgradeUrlRaw : undefined;
             if (nickname && /^https?:\/\//.test(url))
-                out.push({ nickname, url, ...(upgradeUrl ? { upgradeUrl } : {}) });
+                out.push({ nickname, url });
         }
         if (out.length === 0)
             throw new Error('ots-calendars.json: no usable entries');
@@ -77,9 +71,7 @@ function getOtsCalendars() {
     return load();
 }
 exports.getOtsCalendars = getOtsCalendars;
-/** Hostname allowlist for the digest + upgrade proxies. Includes BOTH
- *  `url` and `upgradeUrl` hostnames so we can forward to whichever
- *  subdomain a given calendar uses for each endpoint. */
+/** Hostname allowlist for the upgrade proxy. */
 function getOtsCalendarHosts() {
     if (cachedHosts)
         return cachedHosts;
@@ -89,12 +81,6 @@ function getOtsCalendarHosts() {
             hosts.add(new URL(c.url).hostname.toLowerCase());
         }
         catch { /* skip bad URI */ }
-        if (c.upgradeUrl) {
-            try {
-                hosts.add(new URL(c.upgradeUrl).hostname.toLowerCase());
-            }
-            catch { /* skip bad URI */ }
-        }
     }
     cachedHosts = hosts;
     return cachedHosts;
