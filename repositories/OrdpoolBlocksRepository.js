@@ -223,6 +223,7 @@ exports.ORDPOOL_STATS_COLUMNS = [
         'rune', 'runeEtch', 'runeMint', 'runeCenotaph',
         'brc20', 'brc20Deploy', 'brc20Mint', 'brc20Transfer',
         'src20', 'src20Deploy', 'src20Mint', 'src20Transfer',
+        'alkanes',
     ]),
     ...sectionCols('fees', 'fees', s => s.fees, [
         'runeMints', 'nonUncommonRuneMints', 'brc20Mints', 'src20Mints',
