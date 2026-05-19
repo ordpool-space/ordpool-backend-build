@@ -8,6 +8,7 @@ const ordpool_parser_1 = require("ordpool-parser");
 const config_1 = __importDefault(require("../../../config"));
 const blocks_1 = __importDefault(require("../../blocks"));
 const ordpool_missing_stats_1 = __importDefault(require("../../ordpool-missing-stats"));
+const ordpool_alkanes_metadata_1 = __importDefault(require("../../ordpool-alkanes-metadata"));
 const OrdpoolBlocksRepository_1 = __importDefault(require("../../../repositories/OrdpoolBlocksRepository"));
 const OrdpoolOtsRepository_1 = __importDefault(require("../../../repositories/OrdpoolOtsRepository"));
 const ordpool_ots_user_agent_1 = require("../../ordpool-ots-user-agent");
@@ -36,6 +37,7 @@ class GeneralOrdpoolRoutes {
             // body-parser-mangled text). 256-byte cap; real OTS digests are 32 bytes.
             .post(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/digest/:calendar', express_1.default.raw({ type: '*/*', limit: 256 }), this.$proxyOtsDigest)
             .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/ots/stamp-calendars', this.$getOtsStampCalendars)
+            .get(config_1.default.MEMPOOL.API_URL_PREFIX + 'ordpool/alkanes/:block/:tx', this.$getAlkaneMetadata)
             .get('/content/:inscriptionId', this.getInscriptionContent)
             .get('/preview/:inscriptionId', this.getInscriptionPreview)
             .get('/stamp-content/:txid', this.getStampContent)
@@ -347,6 +349,36 @@ class GeneralOrdpoolRoutes {
         }
         catch (e) {
             res.status(500).send(e instanceof Error ? e.message : e);
+        }
+    }
+    // GET https://ordpool.space/api/v1/ordpool/alkanes/2/0  -> DIESEL
+    async $getAlkaneMetadata(req, res) {
+        const blockRaw = req.params.block;
+        const txRaw = req.params.tx;
+        if (!/^\d+$/.test(blockRaw) || !/^\d+$/.test(txRaw)) {
+            res.status(400).json({ error: 'Invalid alkane id; expected non-negative integers' });
+            return;
+        }
+        try {
+            const row = await ordpool_alkanes_metadata_1.default.$getAlkaneMetadata(BigInt(blockRaw), BigInt(txRaw));
+            if (!row) {
+                res.status(404).json({ error: 'No metadata; alkanes RPC not configured or alkane id invalid' });
+                return;
+            }
+            res.setHeader('Cache-Control', row.name ? 'public, max-age=86400' : 'public, max-age=300');
+            res.json({
+                alkaneId: row.alkaneId,
+                block: blockRaw,
+                tx: txRaw,
+                name: row.name,
+                symbol: row.symbol,
+                totalSupply: row.totalSupply,
+                fetchedAt: row.fetchedAt.toISOString(),
+                lastError: row.lastError,
+            });
+        }
+        catch (e) {
+            res.status(500).send(e instanceof Error ? e.message : String(e));
         }
     }
     // Test cases
