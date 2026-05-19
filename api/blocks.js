@@ -69,8 +69,15 @@ const CpfpRepository_2 = __importDefault(require("../repositories/CpfpRepository
 const bitcoin_script_1 = require("../utils/bitcoin-script");
 const database_1 = __importDefault(require("../database"));
 const file_read_1 = require("../utils/file-read");
-// HACK -- Ordpool: min summary version that carries ordpool flags. Older rows fall through to a fresh classify.
-const ORDPOOL_BLOCK_SUMMARY_VERSION = 3;
+// HACK -- Ordpool: min summary version that carries ordpool flags. Older rows
+// fall through to a fresh classify. Bump every time the parser adds a new
+// ordpool flag bit, otherwise cached per-tx flags stay stale (the v9 ordpool_stats
+// migration alone doesn't refresh this -- it's a separate cache).
+//
+// History:
+//   v3: stamps-family flags + OTS
+//   v4: ordpool_alkanes (parser v2.4.8, bit 82)
+const ORDPOOL_BLOCK_SUMMARY_VERSION = 4;
 class Blocks {
     blocks = [];
     blockSummaries = [];
