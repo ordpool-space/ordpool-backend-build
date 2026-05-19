@@ -5,9 +5,20 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const database_1 = __importDefault(require("../database"));
 const logger_1 = __importDefault(require("../logger"));
+const ordpool_parser_flag_version_1 = require("./ordpool-parser-flag-version");
 class OrdpoolDatabaseMigration {
-    // change this after every update
+    // Schema version. Bump for any DDL change (new column, new satellite
+    // table, new index). Parser-flag-only bumps don't bump THIS -- they bump
+    // ORDPOOL_PARSER_FLAG_GENERATION instead, and pair that bump with a new
+    // migration block here that wipes stale ordpool_stats rows. The two
+    // counters move on different cadences but each generation bump must
+    // come with a matching migration block, see
+    // src/api/ordpool-parser-flag-version.ts for the linkage.
     static currentVersion = 9;
+    // Tracked separately so reviewers can scan one file to verify the pairing.
+    // Read in `getMigrationQueries` to assert the generation history line
+    // matches the migration blocks below.
+    static flagGeneration = ordpool_parser_flag_version_1.ORDPOOL_PARSER_FLAG_GENERATION;
     queryTimeout = 3600_000;
     /**
      * Entry point
