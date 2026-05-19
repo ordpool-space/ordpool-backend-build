@@ -70,10 +70,8 @@ const bitcoin_script_1 = require("../utils/bitcoin-script");
 const database_1 = __importDefault(require("../database"));
 const file_read_1 = require("../utils/file-read");
 const ordpool_parser_flag_version_1 = require("./ordpool-parser-flag-version");
-// HACK -- Ordpool: min summary version that carries ordpool flags. Older rows
-// fall through to a fresh classify. Tied to ORDPOOL_PARSER_FLAG_GENERATION
-// so one constant bump covers both this cache AND the ordpool_stats migration
-// pairing -- see src/api/ordpool-parser-flag-version.ts for the rules.
+// HACK -- Ordpool: min summary version that carries ordpool flags. Older
+// rows fall through to a fresh classify.
 const ORDPOOL_BLOCK_SUMMARY_VERSION = ordpool_parser_flag_version_1.ORDPOOL_PARSER_FLAG_GENERATION;
 class Blocks {
     blocks = [];
