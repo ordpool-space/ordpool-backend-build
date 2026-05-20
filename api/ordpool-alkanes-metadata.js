@@ -4,11 +4,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.decodeSimulateData = void 0;
+const ordpool_parser_1 = require("ordpool-parser");
 const AlkaneMetadataRepository_1 = __importDefault(require("../repositories/AlkaneMetadataRepository"));
 const alkanes_rpc_config_1 = require("./explorer/_ordpool/alkanes-rpc-config");
-const SELECTOR_NAME = 99;
-const SELECTOR_SYMBOL = 100;
-const SELECTOR_TOTAL_SUPPLY = 101;
+const ordpool_fetch_1 = require("./ordpool-fetch");
 class AlkanesMetadataService {
     pending = new Map();
     async $getAlkaneMetadata(block, tx) {
@@ -62,9 +61,9 @@ class AlkanesMetadataService {
         for (const url of urls) {
             try {
                 const [name, symbol, totalSupply] = await Promise.all([
-                    this.$callSimulate(url, block, tx, SELECTOR_NAME),
-                    this.$callSimulate(url, block, tx, SELECTOR_SYMBOL),
-                    this.$callSimulate(url, block, tx, SELECTOR_TOTAL_SUPPLY),
+                    this.$callSimulate(url, block, tx, ordpool_parser_1.ALKANE_SELECTOR_NAME),
+                    this.$callSimulate(url, block, tx, ordpool_parser_1.ALKANE_SELECTOR_SYMBOL),
+                    this.$callSimulate(url, block, tx, ordpool_parser_1.ALKANE_SELECTOR_TOTAL_SUPPLY),
                 ]);
                 if (typeof name === 'string' && name.length > 0) {
                     return {
@@ -88,58 +87,49 @@ class AlkanesMetadataService {
     }
     async $callSimulate(url, block, tx, selector) {
         const { timeoutMs } = (0, alkanes_rpc_config_1.getAlkanesRpcConfig)();
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-        try {
-            const resp = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                signal: ctrl.signal,
-                body: JSON.stringify({
-                    jsonrpc: '2.0',
-                    id: selector,
-                    method: 'alkanes_simulate',
-                    params: [{
-                            target: { block: block.toString(), tx: tx.toString() },
-                            alkanes: [],
-                            transaction: '0x',
-                            block: '0x',
-                            height: '20000',
-                            txindex: 0,
-                            inputs: [selector.toString()],
-                            pointer: 0,
-                            refundPointer: 0,
-                            vout: 0,
-                        }],
-                }),
-            });
-            if (!resp.ok) {
-                throw new Error(`HTTP ${resp.status}`);
-            }
-            const json = await resp.json();
-            if (json.error) {
-                throw new Error(`rpc: ${json.error.message ?? 'unknown'}`);
-            }
-            const data = json.result?.execution?.data;
-            if (typeof data !== 'string' || !data.startsWith('0x')) {
-                return null;
-            }
-            return decodeSimulateData(data, selector);
+        const resp = await (0, ordpool_fetch_1.fetchWithTimeout)(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: selector,
+                method: 'alkanes_simulate',
+                params: [{
+                        target: { block: block.toString(), tx: tx.toString() },
+                        alkanes: [],
+                        transaction: '0x',
+                        block: '0x',
+                        height: '20000',
+                        txindex: 0,
+                        inputs: [selector.toString()],
+                        pointer: 0,
+                        refundPointer: 0,
+                        vout: 0,
+                    }],
+            }),
+        }, timeoutMs);
+        if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
         }
-        finally {
-            clearTimeout(timer);
+        const json = await resp.json();
+        if (json.error) {
+            throw new Error(`rpc: ${json.error.message ?? 'unknown'}`);
         }
+        const data = json.result?.execution?.data;
+        if (typeof data !== 'string' || !data.startsWith('0x')) {
+            return null;
+        }
+        return decodeSimulateData(data, selector);
     }
 }
 function decodeSimulateData(hex, selector) {
     if (hex === '0x' || hex.length < 4) {
         return null;
     }
-    const body = hex.slice(2);
-    if (selector === SELECTOR_NAME || selector === SELECTOR_SYMBOL) {
+    const bytes = (0, ordpool_parser_1.hexToBytes)(hex.slice(2));
+    if (selector === ordpool_parser_1.ALKANE_SELECTOR_NAME || selector === ordpool_parser_1.ALKANE_SELECTOR_SYMBOL) {
         let chars = '';
-        for (let i = 0; i < body.length; i += 2) {
-            const byte = parseInt(body.substr(i, 2), 16);
+        for (const byte of bytes) {
             if (byte === 0)
                 break;
             if (byte < 0x20 || byte > 0x7e)
@@ -148,11 +138,7 @@ function decodeSimulateData(hex, selector) {
         }
         return chars.length > 0 ? chars : null;
     }
-    let value = 0n;
-    for (let i = body.length - 2; i >= 0; i -= 2) {
-        value = (value << 8n) | BigInt(parseInt(body.substr(i, 2), 16));
-    }
-    return value;
+    return (0, ordpool_parser_1.littleEndianBytesToBigInt)(bytes);
 }
 exports.decodeSimulateData = decodeSimulateData;
 exports.default = new AlkanesMetadataService();

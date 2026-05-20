@@ -9,6 +9,7 @@ const OrdpoolOtsRepository_1 = __importDefault(require("../repositories/OrdpoolO
 const ordpool_ots_txid_set_1 = __importDefault(require("./ordpool-ots-txid-set"));
 const ordpool_ots_user_agent_1 = require("./ordpool-ots-user-agent");
 const ots_calendars_config_1 = require("./explorer/_ordpool/ots-calendars-config");
+const ordpool_fetch_1 = require("./ordpool-fetch");
 function withTrailingSlash(c) {
     return { nickname: c.nickname, url: c.url.endsWith('/') ? c.url : c.url + '/' };
 }
@@ -151,26 +152,18 @@ class OrdpoolOtsPoller {
         return { calendar: cal.nickname, ok: true, newConfirmed, newPending, upgraded, totalSeen: txList.length };
     }
     async fetchCalendarJson(url) {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
-        try {
-            const res = await this.fetchImpl(url, {
-                headers: {
-                    'Accept': 'application/json',
-                    // Identify ourselves on every 60-second indexer poll so calendar
-                    // operators recognise the traffic and have a path to contact us
-                    // instead of rate-limiting an anonymous Node fetch UA.
-                    'User-Agent': ordpool_ots_user_agent_1.OTS_OUTBOUND_USER_AGENT,
-                },
-                signal: ctrl.signal,
-            });
-            if (!res.ok)
-                throw new Error(`HTTP ${res.status}`);
-            return await res.json();
-        }
-        finally {
-            clearTimeout(timer);
-        }
+        const res = await (0, ordpool_fetch_1.fetchWithTimeout)(url, {
+            headers: {
+                // Identify ourselves on every 60-second indexer poll so calendar
+                // operators recognise the traffic and have a path to contact us
+                // instead of rate-limiting an anonymous Node fetch UA.
+                'Accept': 'application/json',
+                'User-Agent': ordpool_ots_user_agent_1.OTS_OUTBOUND_USER_AGENT,
+            },
+        }, FETCH_TIMEOUT_MS, this.fetchImpl);
+        if (!res.ok)
+            throw new Error(`HTTP ${res.status}`);
+        return await res.json();
     }
 }
 exports.default = new OrdpoolOtsPoller();
