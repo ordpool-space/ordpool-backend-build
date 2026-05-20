@@ -30,16 +30,13 @@ exports.getAlkanesRpcConfig = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const logger_1 = __importDefault(require("../../../logger"));
-// Both endpoints are anonymous, free, JSON-RPC 2.0. They appear to share
-// upstream infra (same block-tip responses), but failing over to the second
-// costs nothing and protects against per-host outages.
 const FALLBACK = Object.freeze({
     urls: Object.freeze([
         'https://mainnet.subfrost.io/v4/jsonrpc',
         'https://mainnet.sandshrew.io/v2/lasereyes',
     ]),
     timeoutMs: 8_000,
-    negativeCacheMs: 60 * 60 * 1000, // 1h
+    negativeCacheMs: 60 * 60 * 1000,
 });
 let cached = null;
 function load() {
@@ -53,7 +50,7 @@ function load() {
             ? parsed.urls.map(u => String(u).replace(/\/+$/, '')).filter(u => /^https?:\/\//.test(u))
             : [...FALLBACK.urls];
         cached = Object.freeze({
-            urls,
+            urls: Object.freeze(urls),
             timeoutMs: typeof parsed.timeoutMs === 'number' && parsed.timeoutMs > 0
                 ? parsed.timeoutMs : FALLBACK.timeoutMs,
             negativeCacheMs: typeof parsed.negativeCacheMs === 'number' && parsed.negativeCacheMs >= 0

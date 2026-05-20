@@ -6,18 +6,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.decodeSimulateData = void 0;
 const AlkaneMetadataRepository_1 = __importDefault(require("../repositories/AlkaneMetadataRepository"));
 const alkanes_rpc_config_1 = require("./explorer/_ordpool/alkanes-rpc-config");
-// Standard fungible-token selectors per alkanes-std-fungible. Non-fungibles
-// won't respond meaningfully; we degrade to NULL name/symbol/supply.
 const SELECTOR_NAME = 99;
 const SELECTOR_SYMBOL = 100;
 const SELECTOR_TOTAL_SUPPLY = 101;
-const U32_MAX = 4294967295;
 class AlkanesMetadataService {
-    /**
-     * Returns the metadata row for an alkane, fetching from RPC on first access
-     * (or after the negative-cache window has expired) and caching to the DB.
-     * Returns null when alkaneId is invalid.
-     */
+    pending = new Map();
     async $getAlkaneMetadata(block, tx) {
         if (block < 0n || tx < 0n) {
             return null;
@@ -27,11 +20,22 @@ class AlkanesMetadataService {
         if (existing && this.isRowFresh(existing)) {
             return existing;
         }
+        const inflight = this.pending.get(alkaneId);
+        if (inflight) {
+            return inflight;
+        }
+        const promise = this.$resolveAlkane(alkaneId, block, tx, existing)
+            .finally(() => this.pending.delete(alkaneId));
+        this.pending.set(alkaneId, promise);
+        return promise;
+    }
+    async $resolveAlkane(alkaneId, block, tx, existing) {
         const { urls } = (0, alkanes_rpc_config_1.getAlkanesRpcConfig)();
         if (urls.length === 0) {
             return existing ?? null;
         }
         const fetched = await this.$fetchFromRpcs(block, tx);
+        const fetchedAt = new Date();
         const row = {
             alkaneId,
             name: fetched.name,
@@ -39,34 +43,24 @@ class AlkanesMetadataService {
             totalSupply: fetched.totalSupply,
             lastError: fetched.error ?? null,
             fetchAttempts: (existing?.fetchAttempts ?? 0) + 1,
+            fetchedAt,
         };
         await AlkaneMetadataRepository_1.default.$upsert(row);
-        return await AlkaneMetadataRepository_1.default.$getByAlkaneId(alkaneId);
+        return row;
     }
     isRowFresh(row) {
-        // Resolved (got at least a name) is cached forever; immutable for
-        // the contract's lifetime.
+        // Resolved rows are immutable: name/symbol never change on-chain.
         if (row.name !== null) {
             return true;
         }
-        // Negative cache: retry after the configured window.
         const { negativeCacheMs } = (0, alkanes_rpc_config_1.getAlkanesRpcConfig)();
-        const age = Date.now() - row.fetchedAt.getTime();
-        return age < negativeCacheMs;
+        return Date.now() - row.fetchedAt.getTime() < negativeCacheMs;
     }
-    /**
-     * Try each configured RPC URL in order. First URL that returns a name
-     * (even if symbol/totalSupply fail) wins. Returns aggregated metadata
-     * or an `error` when every URL failed.
-     */
     async $fetchFromRpcs(block, tx) {
         const { urls } = (0, alkanes_rpc_config_1.getAlkanesRpcConfig)();
         const errors = [];
         for (const url of urls) {
             try {
-                // Three selectors in parallel against the same URL. If `name`
-                // succeeds, we accept this URL's result even if symbol/supply
-                // fail (many non-fungibles still expose `name`).
                 const [name, symbol, totalSupply] = await Promise.all([
                     this.$callSimulate(url, block, tx, SELECTOR_NAME),
                     this.$callSimulate(url, block, tx, SELECTOR_SYMBOL),
@@ -92,11 +86,6 @@ class AlkanesMetadataService {
             error: errors.join(' | ').slice(0, 250),
         };
     }
-    /**
-     * Single JSON-RPC alkanes_simulate call. Returns a string (for name /
-     * symbol) or bigint (for total_supply / decimals). Throws on network /
-     * timeout / non-2xx / parse error.
-     */
     async $callSimulate(url, block, tx, selector) {
         const { timeoutMs } = (0, alkanes_rpc_config_1.getAlkanesRpcConfig)();
         const ctrl = new AbortController();
@@ -142,18 +131,12 @@ class AlkanesMetadataService {
         }
     }
 }
-/**
- * Decode the `data` field from an alkanes_simulate response. String
- * getters (name, symbol) return ASCII bytes; integer getters return
- * little-endian u128.
- */
 function decodeSimulateData(hex, selector) {
     if (hex === '0x' || hex.length < 4) {
         return null;
     }
     const body = hex.slice(2);
     if (selector === SELECTOR_NAME || selector === SELECTOR_SYMBOL) {
-        // ASCII bytes; strip trailing nulls (padding artefact)
         let chars = '';
         for (let i = 0; i < body.length; i += 2) {
             const byte = parseInt(body.substr(i, 2), 16);
@@ -165,7 +148,6 @@ function decodeSimulateData(hex, selector) {
         }
         return chars.length > 0 ? chars : null;
     }
-    // Numeric: little-endian bigint (up to 16 bytes for u128)
     let value = 0n;
     for (let i = body.length - 2; i >= 0; i -= 2) {
         value = (value << 8n) | BigInt(parseInt(body.substr(i, 2), 16));
