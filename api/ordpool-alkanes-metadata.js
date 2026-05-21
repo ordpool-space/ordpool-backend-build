@@ -9,7 +9,14 @@ const AlkaneMetadataRepository_1 = __importDefault(require("../repositories/Alka
 const alkanes_rpc_config_1 = require("./explorer/_ordpool/alkanes-rpc-config");
 const ordpool_fetch_1 = require("./ordpool-fetch");
 class AlkanesMetadataService {
+    // In-flight dedupe: a thundering herd on the same uncached alkaneId fires
+    // one RPC fanout, not N. Resolved promises are removed in the .finally().
     pending = new Map();
+    /**
+     * Returns the metadata row for an alkane, fetching from RPC on first access
+     * (or after the negative-cache window has expired) and caching to the DB.
+     * Returns null when the alkaneId is invalid.
+     */
     async $getAlkaneMetadata(block, tx) {
         if (block < 0n || tx < 0n) {
             return null;
@@ -52,14 +59,23 @@ class AlkanesMetadataService {
         if (row.name !== null) {
             return true;
         }
+        // Negative cache: retry after the configured window has elapsed.
         const { negativeCacheMs } = (0, alkanes_rpc_config_1.getAlkanesRpcConfig)();
         return Date.now() - row.fetchedAt.getTime() < negativeCacheMs;
     }
+    /**
+     * Try each configured RPC URL in order. The first URL that returns a
+     * name (even if symbol/totalSupply fail) wins. Returns aggregated
+     * metadata, or `{ error }` when every URL failed.
+     */
     async $fetchFromRpcs(block, tx) {
         const { urls } = (0, alkanes_rpc_config_1.getAlkanesRpcConfig)();
         const errors = [];
         for (const url of urls) {
             try {
+                // Three selectors in parallel against the same URL. If `name`
+                // succeeds, we accept this URL's result even if symbol/supply
+                // fail (many non-fungibles still expose `name`).
                 const [name, symbol, totalSupply] = await Promise.all([
                     this.$callSimulate(url, block, tx, ordpool_parser_1.ALKANE_SELECTOR_NAME),
                     this.$callSimulate(url, block, tx, ordpool_parser_1.ALKANE_SELECTOR_SYMBOL),
@@ -85,6 +101,11 @@ class AlkanesMetadataService {
             error: errors.join(' | ').slice(0, 250),
         };
     }
+    /**
+     * Single JSON-RPC `alkanes_simulate` call. Returns a string (for name /
+     * symbol) or bigint (for total_supply). Throws on network / timeout /
+     * non-2xx / parse error.
+     */
     async $callSimulate(url, block, tx, selector) {
         const { timeoutMs } = (0, alkanes_rpc_config_1.getAlkanesRpcConfig)();
         const resp = await (0, ordpool_fetch_1.fetchWithTimeout)(url, {
@@ -122,12 +143,18 @@ class AlkanesMetadataService {
         return decodeSimulateData(data, selector);
     }
 }
+/**
+ * Decode the `data` field from an `alkanes_simulate` response. String
+ * getters (name, symbol) return ASCII bytes; integer getters return
+ * little-endian u128 as a bigint.
+ */
 function decodeSimulateData(hex, selector) {
     if (hex === '0x' || hex.length < 4) {
         return null;
     }
     const bytes = (0, ordpool_parser_1.hexToBytes)(hex.slice(2));
     if (selector === ordpool_parser_1.ALKANE_SELECTOR_NAME || selector === ordpool_parser_1.ALKANE_SELECTOR_SYMBOL) {
+        // ASCII bytes; stop at the first NUL (the contract pads with zeros).
         let chars = '';
         for (const byte of bytes) {
             if (byte === 0)
@@ -138,6 +165,7 @@ function decodeSimulateData(hex, selector) {
         }
         return chars.length > 0 ? chars : null;
     }
+    // Numeric: little-endian bigint (up to 16 bytes for u128).
     return (0, ordpool_parser_1.littleEndianBytesToBigInt)(bytes);
 }
 exports.decodeSimulateData = decodeSimulateData;
