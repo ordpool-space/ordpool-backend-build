@@ -207,11 +207,19 @@ class Server {
             this.wssUnixSocket = new WebSocket.Server({ server: this.serverUnixSocket, maxPayload: websocket_handler_1.default.MAX_MESSAGE_SIZE });
         }
         this.setUpWebsocketHandling();
-        await pools_updater_1.default.updatePoolsJson(); // Needs to be done before loading the disk cache because we sometimes wipe it
-        if (config_1.default.DATABASE.ENABLED === true && config_1.default.MEMPOOL.ENABLED && ['mainnet', 'testnet', 'signet', 'testnet4', 'regtest'].includes(config_1.default.MEMPOOL.NETWORK) && !pools_updater_1.default.currentSha) {
-            logger_1.default.err(`Failed to retreive pools-v2.json sha, cannot run block indexing. Please make sure you've set valid urls in your mempool-config.json::MEMPOOL::POOLS_JSON_URL and mempool-config.json::MEMPOOL::POOLS_JSON_TREE_UR, aborting now`);
-            return process.exit(1);
+        // HACK -- Ordpool: live pools-v2.json fetch retired in favour of the
+        // bundled file at backend/src/tasks/_ordpool/pools-v2.json. The file
+        // is refreshed nightly by .github/workflows/refresh-pools-v2.yml
+        // (commits with [skip ci] so no 3am deploy). New pool definitions
+        // ride into prod with the next regular deployment.
+        await pools_updater_1.default.loadBundledPools();
+        /* HACK -- Ordpool: original upstream block retained for merge symmetry.
+        await poolsUpdater.updatePoolsJson(); // Needs to be done before loading the disk cache because we sometimes wipe it
+        if (config.DATABASE.ENABLED === true && config.MEMPOOL.ENABLED && ['mainnet', 'testnet', 'signet', 'testnet4', 'regtest'].includes(config.MEMPOOL.NETWORK) && !poolsUpdater.currentSha) {
+          logger.err(`Failed to retreive pools-v2.json sha, cannot run block indexing. Please make sure you've set valid urls in your mempool-config.json::MEMPOOL::POOLS_JSON_URL and mempool-config.json::MEMPOOL::POOLS_JSON_TREE_UR, aborting now`);
+          return process.exit(1);
         }
+        */
         await sync_assets_1.default.syncAssets$();
         if (config_1.default.DATABASE.ENABLED) {
             /** @asyncUnsafe */
@@ -273,7 +281,12 @@ class Server {
                 }
             });
         }
-        void pools_updater_1.default.$startService();
+        /* HACK -- Ordpool: pools-updater $startService loop retired; bundled
+         * file is the only source (see backend/src/tasks/_ordpool/pools-v2.json
+         * and the comment above where loadBundledPools() is called).
+         *
+         * void poolsUpdater.$startService();
+         */
     }
     /** @asyncSafe */
     async runMainUpdateLoop() {

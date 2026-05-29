@@ -1,9 +1,34 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const axios_1 = __importDefault(require("axios"));
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
 const pools_parser_1 = __importDefault(require("../api/pools-parser"));
 const config_1 = __importDefault(require("../config"));
 const database_1 = __importDefault(require("../database"));
@@ -20,6 +45,41 @@ class PoolsUpdater {
     currentSha = null;
     poolsUrl = config_1.default.MEMPOOL.POOLS_JSON_URL;
     treeUrl = config_1.default.MEMPOOL.POOLS_JSON_TREE_URL;
+    /**
+     * HACK -- Ordpool: load the bundled pools-v2.json. The file ships
+     * alongside the compiled JS at dist/tasks/_ordpool/pools-v2.json
+     * (copied by the create-resources script in package.json).
+     *
+     * The bundled file is the only source of pool definitions; upstream's
+     * live fetch (updatePoolsJson) and periodic refresh ($startService)
+     * are neutralised at the call sites in index.ts. New pool data arrives
+     * via .github/workflows/refresh-pools-v2.yml pushing an updated
+     * bundle, which deploys on the next regular build. Pool icons (SVG
+     * logos at frontend/src/resources/mining-pools/) are shipped from
+     * upstream mempool/mempool, not from mempool/mining-pools, so newly
+     * added pools fall back to default.svg until the next upstream merge.
+     *
+     * currentSha is left at its default null -- blocks.definition_hash is
+     * nullable, so block inserts succeed; we just don't tag block rows
+     * with a pools-list version.
+     */
+    async loadBundledPools() {
+        const bundlePath = path.join(__dirname, '_ordpool', 'pools-v2.json');
+        const raw = fs.readFileSync(bundlePath, 'utf8');
+        const json = JSON.parse(raw);
+        pools_parser_1.default.setMiningPools(json);
+        if (config_1.default.DATABASE.ENABLED === true) {
+            try {
+                await database_1.default.query('START TRANSACTION;');
+                await pools_parser_1.default.migratePoolsJson();
+                await database_1.default.query('COMMIT;');
+            }
+            catch (e) {
+                await database_1.default.query('ROLLBACK;');
+                throw e;
+            }
+        }
+    }
     /** @asyncSafe */
     async $startService() {
         while ('Bitcoin is still alive') {
