@@ -174,6 +174,10 @@ const defaults = {
     'STRATUM': {
         'ENABLED': false,
         'API': 'http://localhost:1234',
+    },
+    // HACK -- Ordpool: hidden inscriptions (empty default; real list is server-only)
+    'HIDDEN': {
+        'INSCRIPTIONS': [],
     }
 };
 class Config {
@@ -197,6 +201,7 @@ class Config {
     FIAT_PRICE;
     WALLETS;
     STRATUM;
+    HIDDEN; // HACK -- Ordpool: hidden inscriptions
     constructor() {
         const configs = this.merge(configFromFile, defaults);
         this.MEMPOOL = configs.MEMPOOL;
@@ -219,6 +224,7 @@ class Config {
         this.FIAT_PRICE = configs.FIAT_PRICE;
         this.WALLETS = configs.WALLETS;
         this.STRATUM = configs.STRATUM;
+        this.HIDDEN = configs.HIDDEN; // HACK -- Ordpool: hidden inscriptions
     }
     merge = (...objects) => {
         // @ts-ignore

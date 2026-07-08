@@ -15,6 +15,7 @@ const OrdpoolBlocksRepository_1 = __importDefault(require("../../../repositories
 const OrdpoolOtsRepository_1 = __importDefault(require("../../../repositories/OrdpoolOtsRepository"));
 const ordpool_ots_user_agent_1 = require("../../ordpool-ots-user-agent");
 const OrdpoolSkippedBlocksRepository_1 = __importDefault(require("../../../repositories/OrdpoolSkippedBlocksRepository"));
+const hidden_content_1 = require("./hidden-content");
 const ordpool_atomicals_api_1 = __importDefault(require("./ordpool-atomicals.api"));
 const ordpool_inscriptions_api_1 = __importDefault(require("./ordpool-inscriptions.api"));
 const ordpool_stamps_api_1 = __importDefault(require("./ordpool-stamps.api"));
@@ -423,6 +424,11 @@ class GeneralOrdpoolRoutes {
             res.status(400).send('Inscription ID is required.');
             return;
         }
+        // HACK -- Ordpool: hidden inscriptions are refused before decoding the witness.
+        if ((0, hidden_content_1.isHidden)(inscriptionId)) {
+            res.status(451).send('This content is unavailable.');
+            return;
+        }
         try {
             // A bare 64-hex txid (no `iN` suffix) means: return the first image-bearing
             // inscription in this tx. Used by the block-overview atlas, which doesn't know
@@ -456,6 +462,11 @@ class GeneralOrdpoolRoutes {
         const inscriptionId = req.params.inscriptionId;
         if (!inscriptionId) {
             res.status(400).send('Inscription ID is required.');
+            return;
+        }
+        // HACK -- Ordpool: hidden inscriptions are refused before decoding the witness.
+        if ((0, hidden_content_1.isHidden)(inscriptionId)) {
+            res.status(451).send('This content is unavailable.');
             return;
         }
         try {
