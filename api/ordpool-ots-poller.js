@@ -10,6 +10,8 @@ const ordpool_ots_txid_set_1 = __importDefault(require("./ordpool-ots-txid-set")
 const ordpool_ots_user_agent_1 = require("./ordpool-ots-user-agent");
 const ots_calendars_config_1 = require("./explorer/_ordpool/ots-calendars-config");
 const ordpool_fetch_1 = require("./ordpool-fetch");
+const config_1 = __importDefault(require("../config"));
+const ordpool_ots_backfill_1 = require("./ordpool-ots-backfill");
 function withTrailingSlash(c) {
     return { nickname: c.nickname, url: c.url.endsWith('/') ? c.url : c.url + '/' };
 }
@@ -118,11 +120,14 @@ class OrdpoolOtsPoller {
         for (const tx of txList) {
             if (!tx.txid)
                 continue;
-            const merkleRoot = tipHex ?? tx.txid; // fallback: use txid as a stable filler if tip absent (rare)
             const inSet = ordpool_ots_txid_set_1.default.has(tx.txid);
             if (!inSet) {
                 // Newly-seen tx that's already confirmed at the calendar.
                 if (tx.blockheight !== undefined && tx.blockhash !== undefined && tx.blocktime !== undefined) {
+                    // Read the tx's OWN committed root from its OP_RETURN; the calendar
+                    // tip is only the LATEST root, so it is a best-effort fallback used
+                    // only when the electrs fetch fails.
+                    const merkleRoot = await this.resolveMerkleRoot(tx.txid, tipHex ?? tx.txid);
                     await OrdpoolOtsRepository_1.default.upsertConfirmed({
                         txid: tx.txid,
                         calendar: cal.nickname,
@@ -164,7 +169,7 @@ class OrdpoolOtsPoller {
         // DEFAULT_INTERVAL_MS for why that is an accepted loss.
         const mr = body.most_recent_tx;
         if (mr && mr !== 'None' && !ordpool_ots_txid_set_1.default.has(mr)) {
-            const merkleRoot = tipHex ?? mr;
+            const merkleRoot = await this.resolveMerkleRoot(mr, tipHex ?? mr);
             await OrdpoolOtsRepository_1.default.upsertPending({ txid: mr, calendar: cal.nickname, merkleRoot });
             ordpool_ots_txid_set_1.default.add(mr);
             newPending++;
@@ -184,6 +189,29 @@ class OrdpoolOtsPoller {
         if (!res.ok)
             throw new Error(`HTTP ${res.status}`);
         return await res.json();
+    }
+    /**
+     * The 32-byte Merkle root a calendar tx commits lives in its OWN OP_RETURN
+     * (vout[1]), not in the calendar's current `tip` -- the tip is only the
+     * latest root, so stamping every newly-seen tx with it is wrong for any tx
+     * that is not the newest. Fetch the tx from electrs and read its real root,
+     * matching the backfill (extractMerkleRoot). On a fetch / shape failure fall
+     * back to `fallback` so the tx is still recorded this cycle.
+     */
+    async resolveMerkleRoot(txid, fallback) {
+        try {
+            const base = config_1.default.ESPLORA.REST_API_URL.replace(/\/$/, '');
+            const res = await (0, ordpool_fetch_1.fetchWithTimeout)(`${base}/tx/${txid}`, {
+                headers: { 'Accept': 'application/json' },
+            }, FETCH_TIMEOUT_MS, this.fetchImpl);
+            if (!res.ok)
+                return fallback;
+            const tx = await res.json();
+            return (0, ordpool_ots_backfill_1.looksLikeCalendarCommit)(tx) ? (0, ordpool_ots_backfill_1.extractMerkleRoot)(tx) : fallback;
+        }
+        catch {
+            return fallback;
+        }
     }
 }
 exports.default = new OrdpoolOtsPoller();
