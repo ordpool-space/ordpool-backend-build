@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const database_1 = __importDefault(require("../database"));
 const logger_1 = __importDefault(require("../logger"));
+const ordpool_stats_daily_1 = require("./explorer/_ordpool/ordpool-stats-daily");
 class OrdpoolDatabaseMigration {
     // Schema version. Bump for any DDL change (new column, new satellite
     // table, new index). Parser-flag-only bumps don't bump THIS -- they bump
@@ -13,7 +14,7 @@ class OrdpoolDatabaseMigration {
     // counters move on different cadences but every generation bump must
     // come with a matching migration block; see
     // src/api/ordpool-parser-flag-version.ts for the linkage.
-    static currentVersion = 10;
+    static currentVersion = 11;
     queryTimeout = 3600_000;
     /**
      * Entry point
@@ -659,6 +660,13 @@ class OrdpoolDatabaseMigration {
           INDEX idx_fetched_at (fetched_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
+        }
+        // Daily pre-aggregation for the ordpool-stats charts. Historical day-buckets
+        // are immutable, so the chart query reads ~700 precomputed rows instead of
+        // re-scanning ~117k blocks per request (GROUP BY date-functions -> temp
+        // table + filesort). Populated + kept current by OrdpoolStatsDaily.
+        if (version <= 10) {
+            queries.push((0, ordpool_stats_daily_1.rollupTableDdl)());
         }
         return queries;
     }

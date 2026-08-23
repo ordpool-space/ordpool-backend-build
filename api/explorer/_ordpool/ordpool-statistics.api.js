@@ -1,4 +1,27 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -8,6 +31,7 @@ const config_1 = __importDefault(require("../../../config"));
 const database_1 = __importDefault(require("../../../database"));
 const logger_1 = __importDefault(require("../../../logger"));
 const get_sql_interval_1 = require("./get-sql-interval");
+const ordpool_stats_daily_1 = __importStar(require("./ordpool-stats-daily"));
 class OrdpoolStatisticsApi {
     async getOrdpoolStatistics(type, interval, aggregation) {
         const firstInscriptionHeight = (0, ordpool_parser_1.getFirstInscriptionHeight)(config_1.default.MEMPOOL.NETWORK);
@@ -27,15 +51,21 @@ class OrdpoolStatisticsApi {
             // chain yet.
             return this.getSatelliteTotal(firstInscriptionHeight, sqlInterval, aggregation, 'ordpool_stats_ots');
         }
-        const selectClause = this.getSelectClause(type);
-        const groupByClause = this.getGroupByClause(aggregation);
+        // Historical day/week/month/year charts read the pre-aggregated daily
+        // rollup (milliseconds) instead of re-scanning every block in the window
+        // (~27s). block/hour over a long interval is coarsened to day -- block-level
+        // over a year is tens of thousands of unreadable points anyway.
+        const effectiveAggregation = this.coarsenAggregation(interval, aggregation);
+        if (effectiveAggregation !== 'block' && effectiveAggregation !== 'hour' && await ordpool_stats_daily_1.default.isReady()) {
+            return this.getFromRollup(type, sqlInterval, effectiveAggregation);
+        }
         const query = `
-      SELECT ${selectClause}
+      SELECT ${(0, ordpool_stats_daily_1.getLiveSelectClause)(type)}
       FROM blocks b
       LEFT JOIN ordpool_stats bos ON b.hash = bos.hash
       WHERE b.height >= ${firstInscriptionHeight}
         AND b.blockTimestamp >= DATE_SUB(NOW(), INTERVAL ${sqlInterval})
-      ${groupByClause}
+      ${this.getGroupByClause(aggregation)}
       ORDER BY b.blockTimestamp DESC
     `;
         try {
@@ -45,6 +75,56 @@ class OrdpoolStatisticsApi {
         catch (error) {
             logger_1.default.err(`Error executing query: ${error}`, 'Ordpool');
             throw error;
+        }
+    }
+    /** Read a main (non-satellite) chart from the daily rollup: a GROUP BY over
+     *  ~700 immutable daily rows, indexed, no temp-table scan over 100k+ blocks. */
+    async getFromRollup(type, sqlInterval, aggregation) {
+        const query = `
+      SELECT ${(0, ordpool_stats_daily_1.getRollupSelectClause)(type)}
+      FROM ordpool_stats_daily d
+      WHERE d.day >= DATE_SUB(CURDATE(), INTERVAL ${sqlInterval})
+      ${(0, ordpool_stats_daily_1.rollupGroupBy)(aggregation)}
+      ORDER BY minTime DESC
+    `;
+        try {
+            const [rows] = await database_1.default.query(query);
+            return rows;
+        }
+        catch (error) {
+            logger_1.default.err(`Error executing rollup query: ${error}`, 'Ordpool');
+            throw error;
+        }
+    }
+    /** block/hour aggregation over a long interval produces thousands of
+     *  unreadable points and a slow scan; coarsen to day past a small budget so
+     *  those requests serve fast from the rollup instead. */
+    coarsenAggregation(interval, aggregation) {
+        if (aggregation !== 'block' && aggregation !== 'hour') {
+            return aggregation;
+        }
+        const days = this.intervalToDays(interval);
+        if (aggregation === 'block' && days > 2) {
+            return 'day';
+        }
+        if (aggregation === 'hour' && days > 14) {
+            return 'day';
+        }
+        return aggregation;
+    }
+    intervalToDays(interval) {
+        const m = /^(\d+)([hwdmy])$/.exec(interval);
+        if (!m) {
+            return 0;
+        }
+        const n = parseInt(m[1], 10);
+        switch (m[2]) {
+            case 'h': return n / 24;
+            case 'd': return n;
+            case 'w': return n * 7;
+            case 'm': return n * 30;
+            case 'y': return n * 365;
+            default: return 0;
         }
     }
     /** Per-discriminator breakdown for charts whose data lives in a satellite
@@ -108,121 +188,6 @@ class OrdpoolStatisticsApi {
         catch (error) {
             logger_1.default.err(`Error executing ${satelliteTable} breakdown query: ${error}`, 'Ordpool');
             throw error;
-        }
-    }
-    getSelectClause(type) {
-        const baseClause = `
-      MIN(b.height) AS minHeight,
-      MAX(b.height) AS maxHeight,
-      MIN(UNIX_TIMESTAMP(b.blockTimestamp)) AS minTime,
-      MAX(UNIX_TIMESTAMP(b.blockTimestamp)) AS maxTime
-    `;
-        switch (type) {
-            case 'mints':
-                return `
-          ${baseClause},
-          SUM(bos.amounts_cat21_mint) AS cat21Mints,
-          SUM(bos.amounts_inscription_mint) AS inscriptionMints,
-          SUM(bos.amounts_rune_mint) AS runeMints,
-          SUM(bos.amounts_brc20_mint) AS brc20Mints,
-          SUM(bos.amounts_src20_mint) AS src20Mints
-        `;
-            case 'new-tokens':
-                return `
-          ${baseClause},
-          SUM(bos.amounts_rune_etch) AS runeEtchings,
-          SUM(bos.amounts_brc20_deploy) AS brc20Deploys,
-          SUM(bos.amounts_src20_deploy) AS src20Deploys
-        `;
-            case 'fees':
-                return `
-          ${baseClause},
-          SUM(bos.fees_rune_mints) AS feesRuneMints,
-          SUM(bos.fees_non_uncommon_rune_mints) AS feesNonUncommonRuneMints,
-          SUM(bos.fees_brc20_mints) AS feesBrc20Mints,
-          SUM(bos.fees_src20_mints) AS feesSrc20Mints,
-          SUM(bos.fees_cat21_mints) AS feesCat21Mints,
-          SUM(bos.fees_atomicals) AS feesAtomicals,
-          SUM(bos.fees_inscription_mints) AS feesInscriptionMints
-        `;
-            case 'inscription-sizes':
-                return `
-          ${baseClause},
-          SUM(bos.inscriptions_total_envelope_size) AS totalEnvelopeSize,
-          SUM(bos.inscriptions_total_content_size) AS totalContentSize,
-          MAX(bos.inscriptions_largest_envelope_size) AS largestEnvelopeSize,
-          MAX(bos.inscriptions_largest_content_size) AS largestContentSize,
-          AVG(bos.inscriptions_average_envelope_size) AS avgEnvelopeSize,
-          AVG(bos.inscriptions_average_content_size) AS avgContentSize
-        `;
-            case 'protocols':
-                return `
-          ${baseClause},
-          SUM(bos.amounts_counterparty) AS counterparty,
-          SUM(bos.amounts_stamp) AS stamp,
-          SUM(bos.amounts_src721) AS src721,
-          SUM(bos.amounts_src101) AS src101
-        `;
-            case 'inscription-types':
-                return `
-          ${baseClause},
-          SUM(bos.amounts_inscription_image) AS inscriptionImages,
-          SUM(bos.amounts_inscription_text) AS inscriptionTexts,
-          SUM(bos.amounts_inscription_json) AS inscriptionJsons
-        `;
-            case 'inscription-type-sizes':
-                return `
-          ${baseClause},
-          SUM(bos.inscriptions_image_total_envelope_size) AS imageTotalEnvelopeSize,
-          SUM(bos.inscriptions_image_total_content_size)  AS imageTotalContentSize,
-          AVG(bos.inscriptions_image_average_envelope_size) AS imageAvgEnvelopeSize,
-          AVG(bos.inscriptions_image_average_content_size)  AS imageAvgContentSize,
-          SUM(bos.inscriptions_text_total_envelope_size)  AS textTotalEnvelopeSize,
-          SUM(bos.inscriptions_text_total_content_size)   AS textTotalContentSize,
-          AVG(bos.inscriptions_text_average_envelope_size) AS textAvgEnvelopeSize,
-          AVG(bos.inscriptions_text_average_content_size)  AS textAvgContentSize,
-          SUM(bos.inscriptions_json_total_envelope_size)  AS jsonTotalEnvelopeSize,
-          SUM(bos.inscriptions_json_total_content_size)   AS jsonTotalContentSize,
-          AVG(bos.inscriptions_json_average_envelope_size) AS jsonAvgEnvelopeSize,
-          AVG(bos.inscriptions_json_average_content_size)  AS jsonAvgContentSize
-        `;
-            case 'inscription-type-fees':
-                return `
-          ${baseClause},
-          SUM(bos.fees_inscription_image_mints) AS feesInscriptionImageMints,
-          SUM(bos.fees_inscription_text_mints)  AS feesInscriptionTextMints,
-          SUM(bos.fees_inscription_json_mints)  AS feesInscriptionJsonMints
-        `;
-            case 'inscription-compression':
-                return `
-          ${baseClause},
-          SUM(bos.inscriptions_brotli_count)             AS brotliCount,
-          SUM(bos.inscriptions_gzip_count)               AS gzipCount,
-          SUM(bos.inscriptions_compressed_envelope_bytes) AS compressedEnvelopeBytes
-        `;
-            case 'cat21-stats':
-                return `
-          ${baseClause},
-          SUM(bos.amounts_cat21_mint)  AS cat21Mints,
-          SUM(bos.cat21_genesis_count) AS cat21GenesisCount,
-          AVG(bos.cat21_avg_fee_rate)  AS cat21AvgFeeRate,
-          MIN(bos.cat21_min_fee_rate)  AS cat21MinFeeRate,
-          MAX(bos.cat21_max_fee_rate)  AS cat21MaxFeeRate
-        `;
-            case 'rune-activity':
-                // Returns both overall and non-uncommon series in one response so the
-                // chart shows both lines together — UNCOMMON•GOODS dominance is real
-                // and worth surfacing alongside the "what other runes are happening"
-                // signal.
-                return `
-          ${baseClause},
-          SUM(bos.runes_unique_mints_count)              AS uniqueMints,
-          SUM(bos.runes_unique_mints_count_non_uncommon) AS uniqueMintsNonUncommon,
-          MAX(bos.runes_top_mint_count)                  AS topMintCount,
-          MAX(bos.runes_top_mint_count_non_uncommon)     AS topMintCountNonUncommon
-        `;
-            default:
-                throw new Error('Invalid chart type: ' + type);
         }
     }
     getGroupByClause(aggregation) {

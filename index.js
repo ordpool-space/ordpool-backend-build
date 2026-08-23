@@ -82,6 +82,7 @@ const stratum_1 = __importDefault(require("./api/services/stratum"));
 const ordpool_database_migration_1 = __importDefault(require("./api/ordpool-database-migration"));
 const ordpool_ots_txid_set_1 = __importDefault(require("./api/ordpool-ots-txid-set"));
 const ordpool_ots_poller_1 = __importDefault(require("./api/ordpool-ots-poller"));
+const ordpool_stats_daily_1 = __importDefault(require("./api/explorer/_ordpool/ordpool-stats-daily"));
 const ordpool_routes_1 = __importDefault(require("./api/explorer/_ordpool/ordpool.routes"));
 const ordpool_indexer_1 = __importDefault(require("./ordpool-indexer"));
 class Server {
@@ -175,6 +176,11 @@ class Server {
                     logger_1.default.warn('OTS txid-set bootstrap failed; continuing with empty set. Reason: ' + (e instanceof Error ? e.message : e), 'Ordpool');
                 }
                 ordpool_ots_poller_1.default.start();
+                // Backfills the ordpool-stats daily rollup on first tick (if empty) and
+                // keeps today's bucket current; the stats API reads it for day/week/
+                // month/year charts. Non-blocking: charts fall back to the live query
+                // until the rollup is ready.
+                ordpool_stats_daily_1.default.start();
             }
             catch (e) {
                 throw new Error(e instanceof Error ? e.message : 'Error');
