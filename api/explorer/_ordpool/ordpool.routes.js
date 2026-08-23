@@ -497,6 +497,11 @@ class GeneralOrdpoolRoutes {
             res.status(400).send('Valid txid is required.');
             return;
         }
+        // HACK -- Ordpool: hidden content is refused before parsing/serving, same as /content and /preview.
+        if ((0, hidden_content_1.isHidden)(txid)) {
+            res.status(451).send('This content is unavailable.');
+            return;
+        }
         try {
             const stamp = await ordpool_stamps_api_1.default.$getStamp(txid);
             if (!stamp) {
@@ -516,6 +521,11 @@ class GeneralOrdpoolRoutes {
         const txid = req.params.txid;
         if (!txid || !(0, ordpool_parser_1.isValidTxid)(txid)) {
             res.status(400).send('Valid txid is required.');
+            return;
+        }
+        // HACK -- Ordpool: hidden content is refused before parsing/serving, same as /content and /preview.
+        if ((0, hidden_content_1.isHidden)(txid)) {
+            res.status(451).send('This content is unavailable.');
             return;
         }
         try {

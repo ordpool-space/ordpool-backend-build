@@ -1,12 +1,19 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const ordpool_parser_1 = require("ordpool-parser");
+const hidden_content_1 = require("./hidden-content");
 const ordpool_tx_fetch_helper_1 = require("./ordpool-tx-fetch.helper");
 class OrdpoolInscriptionsApi {
     async $getInscriptionOrDelegeate(inscriptionId, recursiveLevel = 0) {
         // prevent endless loops via circular delegates
         if (recursiveLevel > 4) {
             throw new Error('Too many delegate levels. Stopping.');
+        }
+        // HACK -- Ordpool: a non-hidden inscription can delegate to a hidden
+        // target. The route gates only the requested id, so gate every resolved
+        // id here (initial + each delegate hop) before decoding its witness.
+        if ((0, hidden_content_1.isHidden)(inscriptionId)) {
+            return undefined;
         }
         const inscription = await this.$getInscriptionById(inscriptionId);
         if (!inscription) {

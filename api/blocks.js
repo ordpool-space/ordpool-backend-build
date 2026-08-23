@@ -227,7 +227,7 @@ class Blocks {
                 vsize: tx.weight / 4,
                 fee: tx.fee ? Math.round(tx.fee * 100000000) : 0,
                 value: Math.round(tx.vout.reduce((acc, vout) => acc + (vout.value ? vout.value : 0), 0) * 100000000),
-                flags: 0,
+                flags: '0',
             };
         });
         return {
@@ -841,7 +841,7 @@ class Blocks {
                     // classify template
                     const blockHash = unclassifiedTemplates[height];
                     const template = await BlocksSummariesRepository_1.default.$getTemplate(blockHash);
-                    const alreadyClassified = template?.transactions?.reduce((classified, tx) => (classified || tx.flags > 0), false);
+                    const alreadyClassified = template?.transactions?.reduce((classified, tx) => (classified || (!!tx.flags && tx.flags !== '0')), false);
                     let classifiedTemplate = template?.transactions || [];
                     if (!alreadyClassified) {
                         const templateTxs = [];
@@ -871,7 +871,7 @@ class Blocks {
                         }
                         classifiedTemplate = classifiedTemplate.map(tx => {
                             if (classifiedTxMap[tx.txid]) {
-                                tx.flags = classifiedTxMap[tx.txid].flags || 0;
+                                tx.flags = classifiedTxMap[tx.txid].flags || '0';
                             }
                             return tx;
                         });
@@ -1405,7 +1405,7 @@ class Blocks {
         if (cpfpSummary && !common_1.Common.isLiquid()) {
             // HACK -- Ordpool: async + Promise.all (getTransactionFlags now awaits parser)
             const classifiedTxs = await Promise.all(cpfpSummary.transactions.map(async (tx) => {
-                let flags = 0;
+                let flags = '0';
                 try {
                     flags = await common_1.Common.getTransactionFlags(tx, height);
                 }
