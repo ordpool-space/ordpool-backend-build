@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.rollupGroupBy = exports.getRollupSelectClause = exports.buildUpsertQuery = exports.rollupTableDdl = exports.getLiveSelectClause = exports.isRollupChart = exports.CHART_METRICS = void 0;
+exports.getSatelliteRollupRead = exports.buildSatelliteUpsert = exports.satelliteRollupDdls = exports.SATELLITE_ROLLUPS = exports.rollupGroupBy = exports.getRollupSelectClause = exports.buildUpsertQuery = exports.rollupTableDdl = exports.getLiveSelectClause = exports.isRollupChart = exports.CHART_METRICS = void 0;
 const ordpool_parser_1 = require("ordpool-parser");
 const config_1 = __importDefault(require("../../../config"));
 const database_1 = __importDefault(require("../../../database"));
@@ -246,6 +246,90 @@ function rollupGroupBy(aggregation) {
     }
 }
 exports.rollupGroupBy = rollupGroupBy;
+exports.SATELLITE_ROLLUPS = [
+    {
+        chartType: 'atomical-ops',
+        sourceTable: 'ordpool_stats_atomical_op',
+        rollupTable: 'ordpool_stats_atomical_op_daily',
+        joinKey: 'sat.hash',
+        discriminator: { col: 'operation', dbType: 'VARCHAR(16)', alias: 'operation' },
+    },
+    {
+        chartType: 'counterparty-messages',
+        sourceTable: 'ordpool_stats_counterparty',
+        rollupTable: 'ordpool_stats_counterparty_daily',
+        joinKey: 'sat.hash',
+        discriminator: { col: 'message_type', dbType: 'VARCHAR(40)', alias: 'messageType' },
+    },
+    {
+        chartType: 'ots',
+        sourceTable: 'ordpool_stats_ots',
+        rollupTable: 'ordpool_stats_ots_daily',
+        joinKey: 'sat.blockhash',
+    },
+];
+function satelliteRollupDdl(cfg) {
+    const cols = ['`day` DATE NOT NULL'];
+    if (cfg.discriminator) {
+        cols.push(`\`${cfg.discriminator.col}\` ${cfg.discriminator.dbType} NOT NULL`);
+    }
+    cols.push('`count` BIGINT NULL', '`minHeight` INT NULL', '`maxHeight` INT NULL', '`minTime` BIGINT NULL', '`maxTime` BIGINT NULL');
+    cols.push(cfg.discriminator ? `PRIMARY KEY (\`day\`, \`${cfg.discriminator.col}\`)` : 'PRIMARY KEY (`day`)');
+    return `CREATE TABLE IF NOT EXISTS ${cfg.rollupTable} (\n  ${cols.join(',\n  ')}\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`;
+}
+function satelliteRollupDdls() {
+    return exports.SATELLITE_ROLLUPS.map(satelliteRollupDdl);
+}
+exports.satelliteRollupDdls = satelliteRollupDdls;
+function buildSatelliteUpsert(cfg, firstInscriptionHeight, extraWhere) {
+    const insertCols = ['`day`'];
+    const selectCols = ['DATE(b.blockTimestamp) AS `day`'];
+    const groupBy = ['DATE(b.blockTimestamp)'];
+    if (cfg.discriminator) {
+        insertCols.push(`\`${cfg.discriminator.col}\``);
+        selectCols.push(`sat.${cfg.discriminator.col} AS \`${cfg.discriminator.col}\``);
+        groupBy.push(`sat.${cfg.discriminator.col}`);
+    }
+    insertCols.push('count', 'minHeight', 'maxHeight', 'minTime', 'maxTime');
+    selectCols.push('COUNT(*) AS count', 'MIN(b.height) AS minHeight', 'MAX(b.height) AS maxHeight', 'MIN(UNIX_TIMESTAMP(b.blockTimestamp)) AS minTime', 'MAX(UNIX_TIMESTAMP(b.blockTimestamp)) AS maxTime');
+    const updates = ['count', 'minHeight', 'maxHeight', 'minTime', 'maxTime'].map((c) => `${c} = VALUES(${c})`).join(', ');
+    return `
+    INSERT INTO ${cfg.rollupTable} (${insertCols.join(', ')})
+    SELECT ${selectCols.join(',\n      ')}
+    FROM blocks b
+    JOIN ${cfg.sourceTable} sat ON ${cfg.joinKey} = b.hash
+    WHERE b.height >= ${firstInscriptionHeight}${extraWhere}
+    GROUP BY ${groupBy.join(', ')}
+    ON DUPLICATE KEY UPDATE ${updates};`;
+}
+exports.buildSatelliteUpsert = buildSatelliteUpsert;
+/** Read a satellite chart from its daily rollup (SUM the daily COUNTs), or null
+ *  if `chartType` is not a satellite chart. */
+function getSatelliteRollupRead(chartType, sqlInterval, aggregation) {
+    const cfg = exports.SATELLITE_ROLLUPS.find((c) => c.chartType === chartType);
+    if (!cfg) {
+        return null;
+    }
+    const selectCols = [
+        'MIN(d.minHeight) AS minHeight',
+        'MAX(d.maxHeight) AS maxHeight',
+        'MIN(d.minTime) AS minTime',
+        'MAX(d.maxTime) AS maxTime',
+    ];
+    const groupBy = [rollupGroupBy(aggregation).replace(/^GROUP BY /, '')];
+    if (cfg.discriminator) {
+        selectCols.push(`d.${cfg.discriminator.col} AS ${cfg.discriminator.alias}`);
+        groupBy.push(`d.${cfg.discriminator.col}`);
+    }
+    selectCols.push('SUM(d.count) AS count');
+    return `
+    SELECT ${selectCols.join(',\n      ')}
+    FROM ${cfg.rollupTable} d
+    WHERE d.day >= DATE_SUB(CURDATE(), INTERVAL ${sqlInterval})
+    GROUP BY ${groupBy.join(', ')}
+    ORDER BY minTime DESC`;
+}
+exports.getSatelliteRollupRead = getSatelliteRollupRead;
 const REFRESH_INTERVAL_MS = 3 * 60 * 1000;
 /** Recompute this many trailing days each tick: today's bucket always moves,
  *  and a small window absorbs late-arriving reorged/re-indexed blocks. */
@@ -274,33 +358,39 @@ class OrdpoolStatsDaily {
             return;
         this.inFlight = true;
         try {
-            const firstInscriptionHeight = (0, ordpool_parser_1.getFirstInscriptionHeight)(config_1.default.MEMPOOL.NETWORK);
-            if (await this.isEmpty()) {
-                logger_1.default.info('ordpool daily rollup empty -> full backfill', 'Ordpool');
-                await database_1.default.query({ sql: buildUpsertQuery(firstInscriptionHeight, ''), timeout: 3600_000 });
-                logger_1.default.notice('ordpool daily rollup backfill complete', 'Ordpool');
-            }
-            else {
-                await database_1.default.query({
-                    sql: buildUpsertQuery(firstInscriptionHeight, `\n        AND b.blockTimestamp >= DATE_SUB(CURDATE(), INTERVAL ${REFRESH_TRAILING_DAYS} DAY)`),
-                    timeout: 600_000,
-                });
+            const first = (0, ordpool_parser_1.getFirstInscriptionHeight)(config_1.default.MEMPOOL.NETWORK);
+            await this.refreshTable('ordpool_stats_daily', (f, w) => buildUpsertQuery(f, w), first);
+            for (const cfg of exports.SATELLITE_ROLLUPS) {
+                await this.refreshTable(cfg.rollupTable, (f, w) => buildSatelliteUpsert(cfg, f, w), first);
             }
         }
         finally {
             this.inFlight = false;
         }
     }
-    async isEmpty() {
-        const [rows] = await database_1.default.query(`SELECT COUNT(*) AS c FROM ordpool_stats_daily;`);
+    /** Full backfill the first time a table is empty, else refresh the trailing
+     *  days: today's bucket always moves and a small window absorbs re-indexed blocks. */
+    async refreshTable(table, build, first) {
+        if (await this.isEmpty(table)) {
+            logger_1.default.info(`ordpool daily rollup ${table} empty -> full backfill`, 'Ordpool');
+            await database_1.default.query({ sql: build(first, ''), timeout: 3600_000 });
+            logger_1.default.notice(`ordpool daily rollup ${table} backfill complete`, 'Ordpool');
+        }
+        else {
+            const extraWhere = `\n        AND b.blockTimestamp >= DATE_SUB(CURDATE(), INTERVAL ${REFRESH_TRAILING_DAYS} DAY)`;
+            await database_1.default.query({ sql: build(first, extraWhere), timeout: 600_000 });
+        }
+    }
+    async isEmpty(table) {
+        const [rows] = await database_1.default.query(`SELECT COUNT(*) AS c FROM ${table};`);
         return (rows[0]?.c ?? 0) === 0;
     }
-    /** The rollup is trustworthy for reads only once it has been backfilled AND
-     *  kept current (its newest day is within the last two days). Otherwise the
-     *  API falls back to the live query. */
-    async isReady() {
+    /** A rollup is trustworthy for reads only once backfilled AND kept current
+     *  (its newest day is within the last two days). Otherwise the API falls back
+     *  to the live query. `table` is always an internal constant, never request input. */
+    async isReady(table = 'ordpool_stats_daily') {
         try {
-            const [rows] = await database_1.default.query(`SELECT MAX(\`day\`) AS maxDay FROM ordpool_stats_daily WHERE \`day\` >= DATE_SUB(CURDATE(), INTERVAL 2 DAY);`);
+            const [rows] = await database_1.default.query(`SELECT MAX(\`day\`) AS maxDay FROM ${table} WHERE \`day\` >= DATE_SUB(CURDATE(), INTERVAL 2 DAY);`);
             return rows[0]?.maxDay != null;
         }
         catch {

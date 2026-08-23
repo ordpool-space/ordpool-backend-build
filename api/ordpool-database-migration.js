@@ -14,7 +14,7 @@ class OrdpoolDatabaseMigration {
     // counters move on different cadences but every generation bump must
     // come with a matching migration block; see
     // src/api/ordpool-parser-flag-version.ts for the linkage.
-    static currentVersion = 11;
+    static currentVersion = 12;
     queryTimeout = 3600_000;
     /**
      * Entry point
@@ -667,6 +667,15 @@ class OrdpoolDatabaseMigration {
         // table + filesort). Populated + kept current by OrdpoolStatsDaily.
         if (version <= 10) {
             queries.push((0, ordpool_stats_daily_1.rollupTableDdl)());
+        }
+        // Daily rollups for the satellite-table charts (atomical-ops,
+        // counterparty-messages, ots): COUNT per day (+ discriminator), the same fix
+        // as the main rollup. Split into its own version so a v11 DB (which already
+        // has the main rollup) still creates these on upgrade.
+        if (version <= 11) {
+            for (const ddl of (0, ordpool_stats_daily_1.satelliteRollupDdls)()) {
+                queries.push(ddl);
+            }
         }
         return queries;
     }

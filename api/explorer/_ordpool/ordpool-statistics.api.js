@@ -36,27 +36,42 @@ class OrdpoolStatisticsApi {
     async getOrdpoolStatistics(type, interval, aggregation) {
         const firstInscriptionHeight = (0, ordpool_parser_1.getFirstInscriptionHeight)(config_1.default.MEMPOOL.NETWORK);
         const sqlInterval = (0, get_sql_interval_1.getSqlInterval)(interval);
-        // Satellite-table charts use their own JOIN target + an extra GROUP BY
-        // discriminator (one series per operation / message_type).
-        if (type === 'atomical-ops') {
-            return this.getSatelliteBreakdown(firstInscriptionHeight, sqlInterval, aggregation, 'ordpool_stats_atomical_op', 'sat.operation', 'operation');
-        }
-        if (type === 'counterparty-messages') {
-            return this.getSatelliteBreakdown(firstInscriptionHeight, sqlInterval, aggregation, 'ordpool_stats_counterparty', 'sat.message_type', 'messageType');
-        }
-        if (type === 'ots') {
-            // ordpool_stats_ots only carries confirmed-by-block rows once the
-            // poller's confirm step fills in blockhash/blockheight. Pending rows
-            // (NULL blockhash) deliberately skip aggregation -- they're not on
-            // chain yet.
+        // Historical day/week/month/year charts read the pre-aggregated daily rollup
+        // (milliseconds) instead of re-scanning every block in the window (~27s).
+        // block/hour over a long interval is coarsened to day -- block-level over a
+        // year is tens of thousands of unreadable points anyway.
+        const effectiveAggregation = this.coarsenAggregation(interval, aggregation);
+        const useRollup = effectiveAggregation !== 'block' && effectiveAggregation !== 'hour';
+        // Satellite-table charts (atomical-ops, counterparty-messages, ots) get the
+        // same rollup treatment for day+ aggregation; short block/hour intervals stay
+        // on the live per-block breakdown/total query.
+        const satellite = ordpool_stats_daily_1.SATELLITE_ROLLUPS.find((c) => c.chartType === type);
+        if (satellite) {
+            const rollupSql = useRollup && await ordpool_stats_daily_1.default.isReady(satellite.rollupTable)
+                ? (0, ordpool_stats_daily_1.getSatelliteRollupRead)(type, sqlInterval, effectiveAggregation)
+                : null;
+            if (rollupSql) {
+                try {
+                    const [rows] = await database_1.default.query(rollupSql);
+                    return rows;
+                }
+                catch (error) {
+                    logger_1.default.err(`Error executing satellite rollup query: ${error}`, 'Ordpool');
+                    throw error;
+                }
+            }
+            if (type === 'atomical-ops') {
+                return this.getSatelliteBreakdown(firstInscriptionHeight, sqlInterval, aggregation, 'ordpool_stats_atomical_op', 'sat.operation', 'operation');
+            }
+            if (type === 'counterparty-messages') {
+                return this.getSatelliteBreakdown(firstInscriptionHeight, sqlInterval, aggregation, 'ordpool_stats_counterparty', 'sat.message_type', 'messageType');
+            }
+            // ordpool_stats_ots only carries confirmed-by-block rows once the poller's
+            // confirm step fills in blockhash/blockheight; pending rows (NULL blockhash)
+            // are filtered by the INNER JOIN.
             return this.getSatelliteTotal(firstInscriptionHeight, sqlInterval, aggregation, 'ordpool_stats_ots');
         }
-        // Historical day/week/month/year charts read the pre-aggregated daily
-        // rollup (milliseconds) instead of re-scanning every block in the window
-        // (~27s). block/hour over a long interval is coarsened to day -- block-level
-        // over a year is tens of thousands of unreadable points anyway.
-        const effectiveAggregation = this.coarsenAggregation(interval, aggregation);
-        if (effectiveAggregation !== 'block' && effectiveAggregation !== 'hour' && await ordpool_stats_daily_1.default.isReady()) {
+        if (useRollup && await ordpool_stats_daily_1.default.isReady()) {
             return this.getFromRollup(type, sqlInterval, effectiveAggregation);
         }
         const query = `
