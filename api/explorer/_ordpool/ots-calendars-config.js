@@ -29,13 +29,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getOtsCalendarHosts = exports.getOtsCalendars = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const ordpool_parser_1 = require("ordpool-parser");
 const logger_1 = __importDefault(require("../../../logger"));
-const FALLBACK_CALENDARS = Object.freeze([
-    Object.freeze({ nickname: 'alice', url: 'https://alice.btc.calendar.opentimestamps.org' }),
-    Object.freeze({ nickname: 'bob', url: 'https://bob.btc.calendar.opentimestamps.org' }),
-    Object.freeze({ nickname: 'finney', url: 'https://finney.calendar.eternitywall.com' }),
-    Object.freeze({ nickname: 'catallaxy', url: 'https://btc.calendar.catallaxy.com' }),
-]);
+// The compiled-in fallback (used only when ots-calendars.json is missing or
+// corrupt) is the parser's canonical list — the single source of truth both
+// fork sides share. Runtime ots-calendars.json still overrides via load().
+const FALLBACK_CALENDARS = ordpool_parser_1.DEFAULT_OTS_CALENDARS;
 let cached = null;
 let cachedHosts = null;
 function load() {

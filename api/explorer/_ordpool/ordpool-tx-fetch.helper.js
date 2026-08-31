@@ -14,10 +14,10 @@ const mempool_1 = __importDefault(require("../../mempool"));
  *
  * `skipConversion=false` is critical: with skipConversion=true the bitcoind
  * RPC shape (vin[].txinwitness, scriptSig as object) is left un-converted,
- * the parser reads vin[].witness and silently returns nothing. Every
- * /preview / /content lookup that fell through to the RPC fetch path used
- * to 404 because of this. Mempool entries are already stored in Esplora
- * shape, so the mempool branch is unaffected.
+ * so the parser reads vin[].witness and returns nothing, and a /preview or
+ * /content lookup that reaches the RPC fetch path yields no inscription.
+ * Mempool entries are already stored in Esplora shape, so the mempool branch
+ * is unaffected.
  */
 async function $fetchTxByTxid(txId) {
     const mempool = mempool_1.default.getMempool();

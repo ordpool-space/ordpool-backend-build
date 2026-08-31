@@ -142,12 +142,6 @@ class OrdpoolStatisticsApi {
             default: return 0;
         }
     }
-    /** Per-discriminator breakdown for charts whose data lives in a satellite
-     *  table (atomical-ops, counterparty-messages). Each chart has one row per
-     *  (period, discriminator) combination — one ECharts series per distinct
-     *  discriminator value. Examples:
-     *    atomical-ops          → discriminator = sat.operation
-     *    counterparty-messages → discriminator = sat.message_type   */
     /** Single-series total per period from a satellite table (no discriminator
      *  column). Used by the `ots` chart -- one COUNT(*) per period. The
      *  satellite is joined on `sat.blockhash = b.hash`; rows whose blockhash
@@ -178,6 +172,12 @@ class OrdpoolStatisticsApi {
             throw error;
         }
     }
+    /** Per-discriminator breakdown for charts whose data lives in a satellite
+     *  table (atomical-ops, counterparty-messages). Each chart has one row per
+     *  (period, discriminator) combination: one ECharts series per distinct
+     *  discriminator value. Examples:
+     *    atomical-ops          → discriminator = sat.operation
+     *    counterparty-messages → discriminator = sat.message_type   */
     async getSatelliteBreakdown(firstInscriptionHeight, sqlInterval, aggregation, satelliteTable, discriminatorCol, discriminatorAlias) {
         // Strip the leading 'GROUP BY' so we can append our discriminator column.
         const groupByTime = this.getGroupByClause(aggregation).replace(/^GROUP BY/, '');
