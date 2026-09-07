@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getCachedTotalBlockCount = exports.__resetTotalBlockCountCache = exports.TOTAL_BLOCK_COUNT_TTL_MS = void 0;
 const config_1 = __importDefault(require("../../config"));
 const logger_1 = __importDefault(require("../../logger"));
 const BlocksAuditsRepository_1 = __importDefault(require("../../repositories/BlocksAuditsRepository"));
@@ -15,6 +16,42 @@ const PricesRepository_1 = __importDefault(require("../../repositories/PricesRep
 const AccelerationRepository_1 = __importDefault(require("../../repositories/AccelerationRepository"));
 const acceleration_1 = __importDefault(require("../services/acceleration"));
 const api_1 = require("../../utils/api");
+// HACK -- Ordpool: cache the all-time block count used for the /mining/pools
+// X-total-count header. It is interval-independent and changes only ~once per
+// block (~10 min), but BlocksRepository.$blockCount(null, null) runs
+// `count(height) WHERE stale = 0` over ~654k rows (~11s -- a bare COUNT(*) is
+// instant, the stale filter forces a full scan). Uncached it ran on EVERY
+// /mining/pools request and was the residual latency left after the pools-stats
+// cache (prod incident 2026-09-07). Short-TTL cache + single-flight, mirroring
+// mining.$getPoolsStats. Module-scope because the route handlers are registered
+// unbound (they use no `this`).
+let cachedTotalBlockCount = null;
+let totalBlockCountInflight = null;
+exports.TOTAL_BLOCK_COUNT_TTL_MS = 5 * 60 * 1000;
+/** Reset the cached total block count (test hook). */
+function __resetTotalBlockCountCache() {
+    cachedTotalBlockCount = null;
+    totalBlockCountInflight = null;
+}
+exports.__resetTotalBlockCountCache = __resetTotalBlockCountCache;
+/**
+ * All-time block count (stale excluded) for the X-total-count header, served
+ * from a short-TTL cache with single-flight so concurrent /mining/pools requests
+ * share ONE underlying count instead of each running the ~11s scan.
+ */
+async function getCachedTotalBlockCount() {
+    if (cachedTotalBlockCount && (Date.now() - cachedTotalBlockCount.at) < exports.TOTAL_BLOCK_COUNT_TTL_MS) {
+        return cachedTotalBlockCount.value;
+    }
+    if (totalBlockCountInflight) {
+        return totalBlockCountInflight;
+    }
+    totalBlockCountInflight = BlocksRepository_1.default.$blockCount(null, null)
+        .then((value) => { cachedTotalBlockCount = { at: Date.now(), value }; return value; })
+        .finally(() => { totalBlockCountInflight = null; });
+    return totalBlockCountInflight;
+}
+exports.getCachedTotalBlockCount = getCachedTotalBlockCount;
 class MiningRoutes {
     initRoutes(app) {
         app
@@ -159,7 +196,7 @@ class MiningRoutes {
     async $getPools(req, res) {
         try {
             const stats = await mining_1.default.$getPoolsStats(req.params.interval);
-            const blockCount = await BlocksRepository_1.default.$blockCount(null, null);
+            const blockCount = await getCachedTotalBlockCount();
             res.header('Pragma', 'public');
             res.header('Cache-control', 'public');
             res.header('X-total-count', blockCount.toString());
