@@ -18,6 +18,12 @@ const bitcoin_api_factory_1 = __importDefault(require("../bitcoin/bitcoin-api-fa
 const database_1 = __importDefault(require("../../database"));
 class Mining {
     blocksPriceIndexingRunning = false;
+    // HACK -- Ordpool: pools-stats cache + single-flight (see $getPoolsStats).
+    // 5 min TTL: pool-dominance stats over a multi-day/month window change
+    // negligibly minute-to-minute, while the underlying aggregation is expensive.
+    poolsStatsTtlMs = 5 * 60 * 1000;
+    poolsStatsCache = {};
+    poolsStatsInflight = {};
     lastHashrateIndexingDate = null;
     lastWeeklyHashrateIndexingDate = null;
     reindexHashrateRequested = false;
@@ -66,9 +72,39 @@ class Mining {
         return await BlocksRepository_1.default.$getHistoricalBlockWeights(this.getTimeRange(interval), common_1.Common.getSqlInterval(interval));
     }
     /**
-     * Generate high level overview of the pool ranks and general stats
+     * Generate high level overview of the pool ranks and general stats.
+     *
+     * HACK -- Ordpool: served through a short-TTL cache + single-flight.
+     * $computePoolsStats runs a heavy blocks x pools x blocks_audits aggregation
+     * ($getPoolsInfo) with no edge cache, so under steady traffic every request
+     * re-ran it concurrently and stacked ~100 copies of the same ~160s query,
+     * melting shared MariaDB (prod incident 2026-09-07, api.ordpool.space
+     * /mining/pools/:interval). The cache serves the last result for
+     * poolsStatsTtlMs; concurrent misses collapse into ONE in-flight query rather
+     * than a stampede, so the box runs at most one copy at a time.
      */
     async $getPoolsStats(interval) {
+        const key = interval ?? 'all';
+        const cached = this.poolsStatsCache[key];
+        if (cached && (Date.now() - cached.at) < this.poolsStatsTtlMs) {
+            return cached.data;
+        }
+        const inflight = this.poolsStatsInflight[key];
+        if (inflight) {
+            return inflight;
+        }
+        const promise = this.$computePoolsStats(interval)
+            .then((data) => {
+            this.poolsStatsCache[key] = { at: Date.now(), data };
+            return data;
+        })
+            .finally(() => {
+            delete this.poolsStatsInflight[key];
+        });
+        this.poolsStatsInflight[key] = promise;
+        return promise;
+    }
+    async $computePoolsStats(interval) {
         const poolsStatistics = {};
         const poolsInfo = await PoolsRepository_1.default.$getPoolsInfo(interval);
         const emptyBlocks = await BlocksRepository_1.default.$countEmptyBlocks(null, interval);
