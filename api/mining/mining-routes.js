@@ -210,7 +210,7 @@ class MiningRoutes {
     async $getPoolsHistoricalHashrate(req, res) {
         try {
             const hashrates = await HashratesRepository_1.default.$getPoolsWeeklyHashrate(req.params.interval);
-            const blockCount = await BlocksRepository_1.default.$blockCount(null, null);
+            const blockCount = await getCachedTotalBlockCount();
             res.header('Pragma', 'public');
             res.header('Cache-control', 'public');
             res.header('X-total-count', blockCount.toString());
@@ -224,7 +224,7 @@ class MiningRoutes {
     async $getPoolHistoricalHashrate(req, res) {
         try {
             const hashrates = await HashratesRepository_1.default.$getPoolWeeklyHashrate(req.params.slug);
-            const blockCount = await BlocksRepository_1.default.$blockCount(null, null);
+            const blockCount = await getCachedTotalBlockCount();
             res.header('Pragma', 'public');
             res.header('Cache-control', 'public');
             res.header('X-total-count', blockCount.toString());
@@ -252,7 +252,7 @@ class MiningRoutes {
         try {
             const hashrates = await HashratesRepository_1.default.$getNetworkDailyHashrate(req.params.interval);
             const difficulty = await DifficultyAdjustmentsRepository_1.default.$getAdjustments(req.params.interval, false);
-            const blockCount = await BlocksRepository_1.default.$blockCount(null, null);
+            const blockCount = await getCachedTotalBlockCount();
             res.header('Pragma', 'public');
             res.header('Cache-control', 'public');
             res.header('X-total-count', blockCount.toString());
@@ -271,7 +271,7 @@ class MiningRoutes {
     async $getHistoricalBlockFees(req, res) {
         try {
             const blockFees = await mining_1.default.$getHistoricalBlockFees(req.params.interval);
-            const blockCount = await BlocksRepository_1.default.$blockCount(null, null);
+            const blockCount = await getCachedTotalBlockCount();
             res.header('Pragma', 'public');
             res.header('Cache-control', 'public');
             res.header('X-total-count', blockCount.toString());
@@ -303,7 +303,7 @@ class MiningRoutes {
     async $getHistoricalBlockRewards(req, res) {
         try {
             const blockRewards = await mining_1.default.$getHistoricalBlockRewards(req.params.interval);
-            const blockCount = await BlocksRepository_1.default.$blockCount(null, null);
+            const blockCount = await getCachedTotalBlockCount();
             res.header('Pragma', 'public');
             res.header('Cache-control', 'public');
             res.header('X-total-count', blockCount.toString());
@@ -317,7 +317,7 @@ class MiningRoutes {
     async $getHistoricalBlockFeeRates(req, res) {
         try {
             const blockFeeRates = await mining_1.default.$getHistoricalBlockFeeRates(req.params.interval);
-            const blockCount = await BlocksRepository_1.default.$blockCount(null, null);
+            const blockCount = await getCachedTotalBlockCount();
             res.header('Pragma', 'public');
             res.header('Cache-control', 'public');
             res.header('X-total-count', blockCount.toString());
@@ -332,7 +332,7 @@ class MiningRoutes {
         try {
             const blockSizes = await mining_1.default.$getHistoricalBlockSizes(req.params.interval);
             const blockWeights = await mining_1.default.$getHistoricalBlockWeights(req.params.interval);
-            const blockCount = await BlocksRepository_1.default.$blockCount(null, null);
+            const blockCount = await getCachedTotalBlockCount();
             res.header('Pragma', 'public');
             res.header('Cache-control', 'public');
             res.header('X-total-count', blockCount.toString());
