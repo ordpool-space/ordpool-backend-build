@@ -26,7 +26,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createElectrsProxyMiddleware = void 0;
+exports.createElectrsProxyMiddleware = exports.applyImmutableBlockCacheHeader = exports.isImmutableEsploraBlockPath = void 0;
 const http = __importStar(require("http"));
 const logger_1 = __importDefault(require("./logger"));
 const ordpool_ots_flag_1 = require("./api/ordpool-ots-flag");
@@ -53,6 +53,40 @@ const ordpool_ots_flag_1 = require("./api/ordpool-ots-flag");
 // lazy probe on the strip wire. Everything else streams through untouched.
 // See ORDPOOL-FLAGS-ARCHITECTURE.md §4.
 const TX_DETAIL_PATH = /^\/tx\/[0-9a-f]{64}$/i;
+// HACK -- Ordpool: immutable-block edge cache for the esplora surface.
+// A block addressed by hash never changes, so `/block/<hash>` and its
+// sub-resources (txids/txs/header/raw) are cacheable ~forever — the electrs
+// equivalent of the /api/v1/block/ tier and mempool's nginx `cache-forever`.
+// electrs sends its own short Cache-Control, and this proxy passes electrs's
+// headers straight to writeHead, so the cache-policy middleware (which runs
+// BEFORE the proxy sets headers) can't win here — we overwrite the header on
+// the electrs response directly. `req.path` is mount-stripped ('/api' removed),
+// so a request to /api/block/<hash> arrives here as '/block/<hash>'.
+// `/status` is EXCLUDED: a block's in_best_chain / next_best can flip on a reorg.
+const IMMUTABLE_BLOCK_CACHE_CONTROL = 'public, max-age=86400, s-maxage=2592000';
+/** True for esplora block resources whose bytes never change (safe to cache 30d). */
+function isImmutableEsploraBlockPath(reqPath) {
+    return reqPath.startsWith('/block/') && !reqPath.endsWith('/status');
+}
+exports.isImmutableEsploraBlockPath = isImmutableEsploraBlockPath;
+/**
+ * If `reqPath` is an immutable esplora block resource and the upstream returned
+ * 2xx, overwrite the electrs Cache-Control (and drop its Expires/Pragma) so the
+ * Cloudflare edge caches it long. Mutates `electrsRes.headers` in place.
+ */
+function applyImmutableBlockCacheHeader(reqPath, electrsRes) {
+    const status = electrsRes.statusCode || 0;
+    if (status < 200 || status >= 300) {
+        return;
+    }
+    if (!isImmutableEsploraBlockPath(reqPath)) {
+        return;
+    }
+    electrsRes.headers['cache-control'] = IMMUTABLE_BLOCK_CACHE_CONTROL;
+    delete electrsRes.headers['expires'];
+    delete electrsRes.headers['pragma'];
+}
+exports.applyImmutableBlockCacheHeader = applyImmutableBlockCacheHeader;
 function createElectrsProxyMiddleware(electrsBaseUrl) {
     const electrsHost = new URL(electrsBaseUrl || 'http://127.0.0.1:3000');
     const port = electrsHost.port || '80';
@@ -69,6 +103,7 @@ function createElectrsProxyMiddleware(electrsBaseUrl) {
             method: req.method,
             headers: { ...req.headers, host: hostHeader },
         }, (electrsRes) => {
+            applyImmutableBlockCacheHeader(req.path, electrsRes);
             if (!injectOtsCommit) {
                 res.writeHead(electrsRes.statusCode || 502, electrsRes.headers);
                 electrsRes.pipe(res);
