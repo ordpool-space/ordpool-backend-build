@@ -11,6 +11,7 @@ const logger_1 = __importDefault(require("../../logger"));
 const common_1 = require("../common");
 const loading_indicators_1 = __importDefault(require("../loading-indicators"));
 const DifficultyAdjustmentsRepository_1 = __importDefault(require("../../repositories/DifficultyAdjustmentsRepository"));
+const single_flight_cache_1 = require("../_ordpool/single-flight-cache");
 const config_1 = __importDefault(require("../../config"));
 const BlocksAuditsRepository_1 = __importDefault(require("../../repositories/BlocksAuditsRepository"));
 const PricesRepository_1 = __importDefault(require("../../repositories/PricesRepository"));
@@ -18,12 +19,10 @@ const bitcoin_api_factory_1 = __importDefault(require("../bitcoin/bitcoin-api-fa
 const database_1 = __importDefault(require("../../database"));
 class Mining {
     blocksPriceIndexingRunning = false;
-    // HACK -- Ordpool: pools-stats cache + single-flight (see $getPoolsStats).
+    // HACK -- Ordpool: pools-stats cache (mechanism in _ordpool/single-flight-cache.ts).
     // 5 min TTL: pool-dominance stats over a multi-day/month window change
     // negligibly minute-to-minute, while the underlying aggregation is expensive.
-    poolsStatsTtlMs = 5 * 60 * 1000;
-    poolsStatsCache = {};
-    poolsStatsInflight = {};
+    poolsStatsCache = new single_flight_cache_1.SingleFlightCache(5 * 60 * 1000, 'pools stats');
     lastHashrateIndexingDate = null;
     lastWeeklyHashrateIndexingDate = null;
     reindexHashrateRequested = false;
@@ -75,53 +74,16 @@ class Mining {
      * Generate high level overview of the pool ranks and general stats.
      *
      * HACK -- Ordpool: served through a short-TTL cache + single-flight +
-     * stale-while-revalidate.
+     * stale-while-revalidate (mechanism in api/_ordpool/single-flight-cache.ts).
      * $computePoolsStats runs a heavy blocks x pools x blocks_audits aggregation
-     * ($getPoolsInfo) with no edge cache, so under steady traffic every request
-     * re-ran it concurrently and stacked ~100 copies of the same query, melting
-     * shared MariaDB (prod incident 2026-09-07, api.ordpool.space
-     * /mining/pools/:interval).
-     *
-     * Three layers now protect the box:
-     *  - Fresh cache (< poolsStatsTtlMs): served instantly.
-     *  - Single-flight: concurrent misses collapse onto ONE in-flight query, so
-     *    at most one copy runs at a time (no stampede).
-     *  - Stale-while-revalidate: once a value exists, an expired entry is served
-     *    immediately while a single background refresh runs. Only the very first
-     *    miss per key (cold start, nothing cached yet) awaits the query, so no
-     *    caller eats the cold-disk recompute latency on every TTL rollover.
+     * with no edge cache; under steady crawler traffic every request re-ran it
+     * concurrently and stacked ~100 copies of the same query, melting shared
+     * MariaDB (prod incident 2026-09-07, api.ordpool.space /mining/pools/:interval).
+     * The cache collapses concurrent misses to one query and serves stale during a
+     * background refresh, so no caller eats the cold recompute on a TTL rollover.
      */
-    async $getPoolsStats(interval) {
-        const key = interval ?? 'all';
-        const cached = this.poolsStatsCache[key];
-        if (cached && (Date.now() - cached.at) < this.poolsStatsTtlMs) {
-            return cached.data;
-        }
-        // Expired or absent: ensure exactly one refresh is running for this key.
-        const inflight = this.poolsStatsInflight[key] ?? this.$startPoolsStatsRefresh(interval, key);
-        // Stale-while-revalidate: a stale-but-usable value is returned at once; the
-        // refresh above keeps running in the background. Only a true cold start
-        // (no cached value at all) awaits the in-flight query.
-        return cached ? cached.data : inflight;
-    }
-    $startPoolsStatsRefresh(interval, key) {
-        const promise = this.$computePoolsStats(interval)
-            .then((data) => {
-            this.poolsStatsCache[key] = { at: Date.now(), data };
-            return data;
-        })
-            .finally(() => {
-            delete this.poolsStatsInflight[key];
-        });
-        this.poolsStatsInflight[key] = promise;
-        // Stale-while-revalidate callers do not await this promise, so a rejection
-        // would surface as an unhandled rejection. Log it here; the stale value
-        // keeps serving and the next request retries. Cold-start callers still
-        // receive the rejection via the returned promise (the route maps it to 500).
-        promise.catch((e) => {
-            logger_1.default.err(`Cannot refresh pools stats (${key}). Reason: ` + (e instanceof Error ? e.message : e));
-        });
-        return promise;
+    $getPoolsStats(interval) {
+        return this.poolsStatsCache.get(interval ?? 'all', () => this.$computePoolsStats(interval));
     }
     async $computePoolsStats(interval) {
         const poolsStatistics = {};
