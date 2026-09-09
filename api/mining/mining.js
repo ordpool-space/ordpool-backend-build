@@ -83,7 +83,14 @@ class Mining {
      * background refresh, so no caller eats the cold recompute on a TTL rollover.
      */
     $getPoolsStats(interval) {
-        return this.poolsStatsCache.get(interval ?? 'all', () => this.$computePoolsStats(interval));
+        // Canonicalize the cache key: getSqlInterval returns null for anything off its
+        // fixed whitelist, so unknown/rotating intervals all collapse to one all-time
+        // key instead of each becoming a distinct cold single-flight miss (re-running
+        // the heavy aggregation) and a permanent, never-evicted Map entry. The key set
+        // is thus bounded to the whitelist + 'all'. $computePoolsStats re-normalizes
+        // the raw interval the same way, so the cached value matches the key.
+        const key = common_1.Common.getSqlInterval(interval) ?? 'all';
+        return this.poolsStatsCache.get(key, () => this.$computePoolsStats(interval));
     }
     async $computePoolsStats(interval) {
         const poolsStatistics = {};
