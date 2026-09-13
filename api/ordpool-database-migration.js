@@ -3,6 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const ordpool_parser_1 = require("ordpool-parser");
+const config_1 = __importDefault(require("../config"));
 const database_1 = __importDefault(require("../database"));
 const logger_1 = __importDefault(require("../logger"));
 const ordpool_stats_daily_1 = require("./explorer/_ordpool/ordpool-stats-daily");
@@ -14,7 +16,7 @@ class OrdpoolDatabaseMigration {
     // counters move on different cadences but every generation bump must
     // come with a matching migration block; see
     // src/api/ordpool-parser-flag-version.ts for the linkage.
-    static currentVersion = 12;
+    static currentVersion = 13;
     queryTimeout = 3600_000;
     /**
      * Entry point
@@ -676,6 +678,51 @@ class OrdpoolDatabaseMigration {
             for (const ddl of (0, ordpool_stats_daily_1.satelliteRollupDdls)()) {
                 queries.push(ddl);
             }
+        }
+        // Inscription parsing was brought to parity with ord (ordpool-parser
+        // 447036e..b3bd5ca), which changes WHICH inscriptions exist and therefore
+        // every per-block inscription aggregate:
+        //   - envelopes whose "ord" marker uses OP_PUSHDATA1/2/4 are now read
+        //     (199 mainnet transactions that produced no inscription before)
+        //   - envelopes with a dangling field survive, as cursed ones do for ord
+        //     (59 txs, which also shifted the iN index of later inscriptions)
+        //   - envelopes outside the leaf script are gone (8 txs)
+        //   - non-minimal body separators no longer truncate the body (5 txs)
+        //   - marker bytes inside push data no longer invent inscriptions (3 txs)
+        //   - content type, content encoding and metaprotocol are dropped when
+        //     they are not valid UTF-8 (188 txs), and metadata with trailing bytes
+        //     is read (60 txs)
+        // Paired with ORDPOOL_PARSER_FLAG_GENERATION 5, which refreshes the
+        // per-tx flag cache in blocks_summaries.
+        //
+        // Every block that can hold an inscription is re-counted, so the rows are
+        // dropped from the first inscription height onwards, including the child
+        // tables: their inserts are plain INSERTs with UNIQUE keys, so leftover
+        // rows would collide on the refill. ordpool_stats_skipped is cleared as
+        // well, otherwise poisoned heights stay excluded from the backfill query
+        // and would keep their stale (or missing) counts forever.
+        if (version <= 12) {
+            const firstInscriptionHeight = (0, ordpool_parser_1.getFirstInscriptionHeight)(config_1.default.MEMPOOL.NETWORK);
+            queries.push(`DELETE FROM ordpool_stats WHERE height >= ${firstInscriptionHeight};`);
+            // The nine satellite tables the block indexer fills from the parser.
+            // ordpool_stats_ots is deliberately NOT in this list: its rows come from
+            // polling the OTS calendars, not from parsing a block, a calendar that
+            // was unreachable cannot be asked again for that window, and its height
+            // column is called blockheight and is nullable.
+            for (const table of [
+                'ordpool_stats_rune_mint',
+                'ordpool_stats_rune_etch',
+                'ordpool_stats_brc20_mint',
+                'ordpool_stats_brc20_deploy',
+                'ordpool_stats_src20_mint',
+                'ordpool_stats_src20_deploy',
+                'ordpool_stats_cat21_mint',
+                'ordpool_stats_atomical_op',
+                'ordpool_stats_counterparty',
+            ]) {
+                queries.push(`DELETE FROM ${table} WHERE height >= ${firstInscriptionHeight};`);
+            }
+            queries.push(`DELETE FROM ordpool_stats_skipped;`);
         }
         return queries;
     }

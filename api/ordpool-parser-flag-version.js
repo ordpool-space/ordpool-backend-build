@@ -29,5 +29,12 @@ exports.ORDPOOL_PARSER_FLAG_GENERATION = void 0;
  *   2 -- stamps-family (counterparty / src721 / src101 / ...)   (migration v5)
  *   3 -- ordpool_ots                                            (migration v6)
  *   4 -- ordpool_alkanes (parser v2.4.8)                        (migration v9)
+ *   5 -- inscription parsing brought to parity with ord:        (migration v13)
+ *        the marker via OP_PUSHDATA1/2/4, envelopes with a
+ *        dangling field, only the leaf script is read, any
+ *        empty push separates the body, envelopes are found by
+ *        decoding instead of scanning bytes, fields that are
+ *        not valid UTF-8 do not exist, metadata is read like
+ *        ciborium, tag keys are compared as bytes
  */
-exports.ORDPOOL_PARSER_FLAG_GENERATION = 4;
+exports.ORDPOOL_PARSER_FLAG_GENERATION = 5;
