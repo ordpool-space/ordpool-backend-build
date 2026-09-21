@@ -9,8 +9,8 @@ const mempool_1 = __importDefault(require("../../mempool"));
 /**
  * Resolve a txid to an Esplora-shape transaction, preferring the in-memory
  * mempool entry and falling back to bitcoind RPC. Returns undefined when the
- * tx is neither in the mempool nor on chain (404), and rethrows any other
- * RPC error.
+ * tx is neither in the mempool nor on chain (esplora HTTP 404 or Core RPC
+ * code -5), and rethrows any other RPC error.
  *
  * `skipConversion=false` is critical: with skipConversion=true the bitcoind
  * RPC shape (vin[].txinwitness, scriptSig as object) is left un-converted,
@@ -29,7 +29,12 @@ async function $fetchTxByTxid(txId) {
         return await bitcoin_api_factory_1.default.$getRawTransaction(txId, false, false, false);
     }
     catch (error) {
-        if (error.response && error.response.status === 404) {
+        // Not found on either backend means the tx is neither in the mempool nor on
+        // chain: esplora answers HTTP 404; bitcoind Core RPC getrawtransaction
+        // rejects with code -5 (RPC_INVALID_ADDRESS_OR_KEY, "No such mempool or
+        // blockchain transaction"). Both map to undefined so callers return 404. Any
+        // other error (RPC down, timeout, txindex mid-rebuild) is a genuine fault.
+        if (error?.response?.status === 404 || error?.code === -5) {
             return undefined;
         }
         throw error;

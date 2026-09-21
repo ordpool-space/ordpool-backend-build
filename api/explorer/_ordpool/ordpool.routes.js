@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const ordpool_parser_1 = require("ordpool-parser");
 const config_1 = __importDefault(require("../../../config"));
+const logger_1 = __importDefault(require("../../../logger"));
 const blocks_1 = __importDefault(require("../../blocks"));
 const bitcoin_api_factory_1 = __importDefault(require("../../bitcoin/bitcoin-api-factory"));
 const ordpool_missing_stats_1 = __importDefault(require("../../ordpool-missing-stats"));
@@ -443,7 +444,11 @@ class GeneralOrdpoolRoutes {
             sendInscription(res, inscription);
         }
         catch (error) {
-            res.status(500).send('Internal server error: ' + error);
+            // Never leak the upstream error string to a public response body; log it
+            // server-side. A not-found tx is already a 404 above ($fetchTxByTxid maps
+            // esplora 404 / Core RPC -5 to undefined), so this branch is a genuine fault.
+            logger_1.default.err('/content error: ' + (error instanceof Error ? error.message : error));
+            res.status(500).send('Internal server error.');
         }
     }
     // Test cases
@@ -484,7 +489,8 @@ class GeneralOrdpoolRoutes {
             }
         }
         catch (error) {
-            res.status(500).send('Internal server error: ' + error);
+            logger_1.default.err('/preview error: ' + (error instanceof Error ? error.message : error));
+            res.status(500).send('Internal server error.');
         }
     }
     // Test cases (live URLs once shipped):
@@ -511,7 +517,8 @@ class GeneralOrdpoolRoutes {
             sendStamp(res, stamp);
         }
         catch (error) {
-            res.status(500).send('Internal server error: ' + error);
+            logger_1.default.err('/stamp-content error: ' + (error instanceof Error ? error.message : error));
+            res.status(500).send('Internal server error.');
         }
     }
     // Test cases (live URLs once shipped):
@@ -537,7 +544,8 @@ class GeneralOrdpoolRoutes {
             sendAtomicalFile(res, file);
         }
         catch (error) {
-            res.status(500).send('Internal server error: ' + error);
+            logger_1.default.err('/atomical-content error: ' + (error instanceof Error ? error.message : error));
+            res.status(500).send('Internal server error.');
         }
     }
 }
