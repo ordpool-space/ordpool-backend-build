@@ -26,7 +26,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createElectrsProxyMiddleware = exports.applyImmutableBlockCacheHeader = exports.isImmutableEsploraBlockPath = void 0;
+exports.createElectrsProxyMiddleware = exports.stripMaxTxs = exports.MAX_PROXIED_BODY_BYTES = exports.applyImmutableBlockCacheHeader = exports.isImmutableEsploraBlockPath = void 0;
 const http = __importStar(require("http"));
 const logger_1 = __importDefault(require("./logger"));
 const ordpool_ots_flag_1 = require("./api/ordpool-ots-flag");
@@ -87,19 +87,63 @@ function applyImmutableBlockCacheHeader(reqPath, electrsRes) {
     delete electrsRes.headers['pragma'];
 }
 exports.applyImmutableBlockCacheHeader = applyImmutableBlockCacheHeader;
+// HACK -- Ordpool: the access rules upstream's nginx applies in front of this
+// split, which a plain path-router loses.
+//
+// `/api/internal/` (electrs) and `/api/v1/internal/` (backend) answer 403 to
+// external clients, as in upstream's `production/nginx/location-api.conf`.
+// Upstream can tell internal from external by source address; we cannot,
+// because cloudflared reaches this process over loopback, so every request
+// here is external and the block is unconditional. Our own backend talks to
+// electrs at ESPLORA.REST_API_URL directly and never goes through this proxy.
+// Case-insensitive because Express route matching is.
+const INTERNAL_PATH = /^\/(v1\/)?internal(\/|$)/i;
+// Request bodies are capped at upstream nginx's `client_max_body_size 10m`
+// (`production/nginx/http-basic.conf`). electrs buffers a whole body before
+// routing it.
+exports.MAX_PROXIED_BODY_BYTES = 10 * 1024 * 1024;
+/**
+ * Drop `max_txs` from the query string, so electrs always applies its own
+ * configured page size on the history routes. No consumer of this API sets it.
+ * URLSearchParams decodes keys, which matters because electrs decodes them too
+ * (`max%5Ftxs` is `max_txs` to it).
+ */
+function stripMaxTxs(url) {
+    const q = url.indexOf('?');
+    if (q === -1) {
+        return url;
+    }
+    const params = new URLSearchParams(url.slice(q + 1));
+    if (!params.has('max_txs')) {
+        return url;
+    }
+    params.delete('max_txs');
+    const rest = params.toString();
+    return rest ? `${url.slice(0, q)}?${rest}` : url.slice(0, q);
+}
+exports.stripMaxTxs = stripMaxTxs;
 function createElectrsProxyMiddleware(electrsBaseUrl) {
     const electrsHost = new URL(electrsBaseUrl || 'http://127.0.0.1:3000');
     const port = electrsHost.port || '80';
     const hostHeader = `${electrsHost.hostname}:${port}`;
     return (req, res, next) => {
+        if (INTERNAL_PATH.test(req.path)) {
+            res.status(403).end();
+            return;
+        }
         if (req.path === '/v1' || req.path.startsWith('/v1/')) {
             return next();
+        }
+        const declaredLength = Number(req.headers['content-length']);
+        if (Number.isFinite(declaredLength) && declaredLength > exports.MAX_PROXIED_BODY_BYTES) {
+            res.status(413).end();
+            return;
         }
         const injectOtsCommit = req.method === 'GET' && TX_DETAIL_PATH.test(req.path);
         const proxyReq = http.request({
             host: electrsHost.hostname,
             port: Number(port),
-            path: req.url,
+            path: stripMaxTxs(req.url),
             method: req.method,
             headers: { ...req.headers, host: hostHeader },
         }, (electrsRes) => {
@@ -150,13 +194,42 @@ function createElectrsProxyMiddleware(electrsBaseUrl) {
                 }
             });
         });
+        let bodyTooLarge = false;
         proxyReq.on('error', (err) => {
+            if (bodyTooLarge) {
+                return;
+            }
             logger_1.default.warn(`electrs proxy error for ${req.method} ${req.url}: ${err.message}`);
             if (!res.headersSent) {
                 res.status(502).send('electrs proxy error');
             }
         });
-        req.pipe(proxyReq);
+        // Counted while streaming, because a chunked body declares no length.
+        let received = 0;
+        req.on('data', (chunk) => {
+            if (bodyTooLarge) {
+                return;
+            }
+            received += chunk.length;
+            if (received > exports.MAX_PROXIED_BODY_BYTES) {
+                bodyTooLarge = true;
+                proxyReq.destroy();
+                if (!res.headersSent) {
+                    res.status(413).end();
+                }
+                req.resume();
+                return;
+            }
+            if (!proxyReq.write(chunk)) {
+                req.pause();
+                proxyReq.once('drain', () => req.resume());
+            }
+        });
+        req.on('end', () => {
+            if (!bodyTooLarge) {
+                proxyReq.end();
+            }
+        });
     };
 }
 exports.createElectrsProxyMiddleware = createElectrsProxyMiddleware;
